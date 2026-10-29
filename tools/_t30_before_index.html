@@ -1,0 +1,1570 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="color-scheme" content="light">
+<title>无线数传遥测平台 v2.7 · CSUST Racing</title>
+<script src="qrc:///qtwebchannel/qwebchannel.js"></script>
+<script src="app.js" defer></script>
+
+<!-- =========================================================================
+     这个文件 = 界面结构(<body> 部分) + 全部样式(<style> 部分)
+
+     想改界面，按下面去找：
+
+       【改颜色 / 字体 / 圆角 / 大数字大小】
+           → <style> 最上面的 :root{ } 变量区（--bg / --panel / --text / --teal ...）
+             改一处全局生效，不用逐个 class 搜。
+
+       【改某个分区的排布】本文件按下面的「分区注释」划分，Ctrl+F 搜名字即可：
+           整体框架 / 顶栏 / 主舞台 /
+           P2 动力总成 / P1 姿态惯性 / P0 ADC 传感 / 趋势曲线 /
+           底部状态栏 / 功能分区(串口·记录·设置) / Toast / 响应式
+
+       【加一个新的显示块】(比如加一个「电池温度」卡片)
+           1. 在一个 <section class="zone"> 里加 DOM，给它一个唯一 id
+           2. 到 app.js 顶部的「界面配置区」给这个量加一行 defSig(...)
+           3. 到 app.js 的 updateDom() 里把数值写到那个 id 上
+           4. 如果它是串口来的新物理量，先在 telemetry_config.py 第 3 区加字段
+
+       【改窄屏布局】
+           → <style> 末尾 @media 区，共 4 档断点：1280 / 1080 / 820 / 520
+
+     ⚠️ 样式里有三条性能红线，改之前务必先看 <style> 顶部的说明：
+        条形用 transform 不用 width、SVG 禁止 drop-shadow、
+        数值 20Hz 更新所以过渡时长必须 < 50ms。
+     ========================================================================= -->
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%231B2434'/%3E%3Cpath d='M6 20 L12 12 L18 20 L26 8' fill='none' stroke='%23F2F5FA' stroke-width='3' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E">
+<style>
+/* ============================================================
+ * 无线数传遥测平台 v2.7 · 浅色专业仪表风
+ * 设计语言：浅灰工作台底 + 白色卡片 + 深 slate 文字 + 分区色条
+ * 分区：P0 传感(10×ADC) / P1 姿态惯性 / P2 动力总成
+ *
+ * 性能约定（改动前务必读，否则会重新引入卡顿）：
+ *  1) 条形/梯子一律用 transform:scaleX/scaleY 驱动，绝不用 width/height
+ *     ——width/height 每帧触发 layout+paint，transform 只走合成层；
+ *  2) 数值以 20Hz 更新，过渡时长必须 < 采样间隔(50ms)，否则动画永远追不上；
+ *  3) SVG 上禁止 filter:drop-shadow（20Hz 更新会让滤镜每帧重算，很贵）；
+ *  4) 高频更新区加 contain:layout paint，把重排/重绘困在区块内。
+ * ============================================================ */
+:root{
+  /* ============================================================
+   * 设计令牌（v2.8 排版与视觉）
+   * 改动动机：一次"看得舒服、干净"的排版升级，但标准不是好看，而是
+   *   ① 扫视效率（赛道边/车库里 3 秒内要知道"车有没有问题"）
+   *   ② 误读风险（阳光下的对比度、数字与单位的对应关系）
+   * 三条依据：
+   *   A) 小字原来有 10/11/12/13px 四种尺寸混用（底栏 10、单位 10、标签 11、
+   *      正文 12…），同一屏里没有规律 → 扫视时抓不住层级。现在收敛成 4 档，
+   *      并把**下限提到 11px**（阳光 + 笔记本屏，10px 基本读不出来）。
+   *   B) 中性灰色阶原来偏浅（--faint #6B7686 在浅底上约 4.4:1，且大量用在
+   *      10~11px 上）→ 车库强光下糊成一片。整体加深一档，全部 ≥ 5.5:1。
+   *   C) 圆角原来有 6/8/9/10/11/12/14/999 八种，描边是半透明灰叠在彩色底纹上
+   *      → 边缘发脏。收敛成 4 档圆角 + 实色描边，卡片边界一眼可辨。
+   * ⚠️ 性能红线（B08/B10）不变：这里只有静态颜色/尺寸，没有 transition/will-change，
+   *    也没有动任何 GPU/渲染参数。高频元素（20Hz 的条/数字）过渡仍 < 50ms。
+   * ============================================================ */
+  /* --- 表面（页面底 → 卡片 → 卡片内的槽位）--- */
+  --bg:#E6EAF0;
+  --bg-glow:rgba(255,255,255,.52);
+  --panel:#FFFFFF;
+  --panel-2:#F4F7FB;
+  --panel-3:#E7ECF3;
+  /* ★ 条形仪表的"空槽"色（中性灰，不带蓝调）。
+     为什么不直接用 --panel-3：它偏蓝，填充色叠上去边界发灰；
+     也不要回到旧版的 rgba(15,23,42,.06)（≈#F0F1F3，太浅）——
+     实测填充降饱和后自身亮度变高，槽太浅会让"填了多少"的边界反而糊掉。
+     （产品体验复核 2026-10-16：条形最终采用"轻版"：22px + 本槽色 + 降饱和填充。） */
+  --track:#E3E6EB;
+  --track-line:#D3D8E0;
+  --line:#DBE1EA;
+  --line-2:#C2CBDA;
+
+  /* --- 文字（对比度：text 14.9:1 / dim 8.6:1 / faint 5.6:1，均在 #FFFFFF 上）--- */
+  --text:#141C29;
+  --dim:#3E4A5E;
+  --faint:#5D6981;
+
+  /* --- 语义色（整体压暗一档，浅底上才够清楚）--- */
+  --teal:#0E8A62;   /* LIVE / 系统正常 / VIS 绿 */
+  --cyan:#0B6EA8;   /* P0 传感通道色 */
+  --amber:#9A4A06;  /* P2 动力 / 预警色 */
+  --red:#C81E1E;    /* 危险 / REC 色 */
+  --violet:#6D28D9; /* P1 姿态色 */
+  --blue:#1D4ED8;   /* 趋势 / 母线电压色 */
+  --lime:#4D7C0F;   /* 油门开度色 */
+  --slate:#556070;  /* 串口 / 设置：中性工作区 */
+
+  /* --- 字体 --- */
+  --num:'JetBrains Mono','Cascadia Code',Consolas,'SF Mono',monospace;
+  --ui:'Segoe UI','Microsoft YaHei',system-ui,sans-serif;
+
+  /* --- 字号阶梯：11 最小（辅助） / 12 标签·控件 / 13 正文 / 15 分区标题 --- */
+  --t-micro:11px;
+  --t-sm:12px;
+  --t-md:13px;
+  --t-lg:15px;
+
+  /* --- 圆角：4 档 --- */
+  --r-zone:12px;
+  --r-card:10px;
+  --r-ctl:8px;
+
+  /* --- 大数字随视口缩放：窄屏不溢出，宽屏不浪费 --- */
+  --fs-hero:clamp(28px,2.7vw,40px);
+  --fs-kpi:clamp(21px,1.9vw,29px);   /* 次级 KPI（P2 的温度/电压/电流）*/
+  /* ★ --fs-sub 只给 #zoneP1 .d-num 用，数值不许动：_accvec_move_check 的基线
+     断言 #zoneP1 四张卡片宽高逐张不变（±1px），改字号会直接让它 FAIL。 */
+  --fs-sub:clamp(20px,1.9vw,27px);
+  --fs-adc:clamp(20px,1.75vw,27px);
+  --r:var(--r-zone);   /* 兼容旧引用 */
+}
+*{box-sizing:border-box;margin:0;padding:0}
+html,body{height:100%}
+body{
+  /* 纯色底：原来叠了两层大半径 radial-gradient，视觉上只是"发灰的高光"，
+     却让整页每帧都要重新光栅化这张底图。纯色更干净也更快。 */
+  background:var(--bg);
+  color:var(--text); font-family:var(--ui);
+  overflow:hidden; font-variant-numeric:tabular-nums;
+}
+/* 滚动条：**宽度保持 8px 不变**。
+   改宽会直接吃掉内容区宽度（滚动条占据 #stage 的 padding box），
+   实测 8->10px 会让六个栅格列整体收窄 2px、每个分区宽度随之变化 1~2px ——
+   而 _accvec_move_check 的基线是"宽度逐张不变 ±1px"，没必要为这点观感冒这个风险。
+   只调了滑块配色与留白。 */
+::-webkit-scrollbar{width:8px;height:8px}
+::-webkit-scrollbar-track{background:transparent}
+::-webkit-scrollbar-thumb{background:#C3CCDA;border-radius:8px}
+::-webkit-scrollbar-thumb:hover{background:#AEB9CA}
+
+/* 键盘可达性：只在键盘聚焦时描边，鼠标点击不打扰 */
+:focus{outline:none}
+:focus-visible{outline:2px solid var(--cyan);outline-offset:2px;border-radius:6px}
+
+/* ---------- 整体框架 ---------- */
+#app{display:flex;height:100vh}
+/* ★ #rail 宽度（64px）不许动：它参与 #stage 的可用宽度计算，
+   而 _accvec_move_check 的基线断言 #zoneP1 内卡片宽度逐张不变（±1px）。 */
+#rail{
+  width:64px;flex:0 0 64px;border-right:1px solid var(--line);
+  display:flex;flex-direction:column;align-items:center;
+  padding:14px 0 10px;gap:6px;background:var(--panel);
+  overflow-y:auto;overflow-x:hidden;
+}
+.logo-sq{
+  width:40px;height:40px;border-radius:10px;overflow:hidden;flex:0 0 40px;
+  display:flex;align-items:center;justify-content:center;margin-bottom:14px;
+  background:var(--panel-2);
+  border:1px solid var(--line);
+}
+.logo-sq img{width:100%;height:100%;object-fit:contain}
+.logo-sq .txt{font-size:13px;font-weight:800;letter-spacing:.5px;color:var(--teal)}
+/* 图标导航：图标放大到 17px、选中态加左侧色条 —— 原来 15px 的符号 ＋ 11px 文字，
+   在"我要切到串口"这种急着操作时不容易命中。 */
+.rail-item{
+  position:relative;
+  width:52px;min-height:46px;padding:8px 0 7px;border-radius:10px;text-align:center;
+  color:var(--faint);font-size:var(--t-micro);cursor:pointer;user-select:none;
+  border:1px solid transparent;background:none;font-family:var(--ui);
+  display:flex;flex-direction:column;align-items:center;justify-content:center;
+  transition:background .15s,color .15s,border-color .15s;
+}
+.rail-item:hover{color:var(--dim);background:var(--panel-2)}
+.rail-item.active{
+  color:var(--teal);background:rgba(14,138,98,.09);
+  border-color:rgba(14,138,98,.28);font-weight:700;
+}
+.rail-item.active::before{
+  content:'';position:absolute;left:-7px;top:50%;transform:translateY(-50%);
+  width:3px;height:22px;border-radius:0 3px 3px 0;background:var(--teal);
+}
+.rail-item .ic{display:block;font-size:17px;line-height:1.15;margin-bottom:3px;font-family:var(--num)}
+
+#main{flex:1;display:flex;flex-direction:column;min-width:0}
+
+/* ---------- 顶栏 ---------- */
+#topbar{
+  height:52px;flex:0 0 52px;border-bottom:1px solid var(--line);
+  display:flex;align-items:center;gap:8px;padding:0 16px;
+  background:var(--panel);
+}
+.brand{display:flex;align-items:center;gap:10px;min-width:0}
+.brand img{height:26px;width:auto}
+.brand .fallback{font-weight:800;font-size:15px;color:var(--teal);letter-spacing:.5px}
+.brand h1{font-size:16px;font-weight:700;letter-spacing:.01em;white-space:nowrap;
+  overflow:hidden;text-overflow:ellipsis}
+.brand .sub{font-size:10px;color:var(--faint);letter-spacing:.16em;margin-top:1px;white-space:nowrap}
+.tb-spacer{flex:1 1 auto}
+.pill{
+  display:inline-flex;align-items:center;gap:6px;
+  font-family:var(--num);font-size:var(--t-sm);color:var(--dim);
+  background:var(--panel-2);border:1px solid var(--line);
+  border-radius:999px;padding:4px 12px;white-space:nowrap;
+}
+.pill b{color:var(--text);font-weight:700}
+.pill.click{cursor:pointer;transition:background .15s,border-color .15s,color .15s}
+.pill.click:hover{border-color:var(--line-2);color:var(--text);background:var(--panel-3)}
+.pill.click:active{background:var(--panel-3)}
+/* ★ 顶栏 RX 计数位宽锁定（task-8 F4 / F6）：与底栏 #rxFoot 同一类缺陷。
+   .pill 是等宽字体，而 #rxTag 每秒变一次数字 -> "#rxPill" 宽度 75↔107，
+   顶栏右侧整簇（v2.7 / 连接状态 / RX）随之整体左右移动（实测左移 33px）。
+   （#recPill/#freezeBtn/#clock 看起来"没动"，只是因为 rxPill 自身 +32 恰好抵消了整簇 -33，
+     并不是它们不受影响 —— 探针里对每个子元素逐一记录坐标才看清这一点。）
+   ★ F6：按现实取值预留（RX ≤ 数千）取 4ch，而不是 6ch，静态位移减半。
+   ch 在等宽字体下就是数字宽度，锁得准。 */
+#rxTag{display:inline-block;text-align:right;min-width:4ch}
+.dot{width:7px;height:7px;border-radius:50%;display:inline-block;flex:0 0 7px}
+.dot.live{background:var(--teal);box-shadow:0 0 8px rgba(14,159,110,.55);animation:pulse 1.6s ease-in-out infinite}
+.dot.rec{background:var(--red);box-shadow:0 0 8px rgba(220,38,38,.55);animation:pulse 1.1s ease-in-out infinite}
+.dot.rec-off{background:#A7B0BE}
+#clock{font-family:var(--num);font-size:14px;color:var(--text);letter-spacing:.04em;font-weight:600}
+.tag-preview{
+  font-size:var(--t-micro);font-weight:700;letter-spacing:.12em;color:var(--amber);
+  border:1px solid rgba(154,74,6,.32);border-radius:6px;padding:3px 8px;
+  background:rgba(154,74,6,.07);
+}
+@keyframes pulse{0%,100%{opacity:1}50%{opacity:.3}}
+
+/* ---------- 主舞台 ---------- */
+#stage{
+  flex:1;overflow-y:auto;overflow-x:hidden;padding:12px 16px 12px;
+  display:grid;grid-template-columns:repeat(6,minmax(0,1fr));gap:12px;
+  align-content:start;
+  /* ★ 这里刻意不用 scroll-behavior:smooth。
+     它会把「滚轮/拖动」也变成缓动动画：手指停了页面还在飘，实测跟手感很差。
+     真需要平滑就单点调用 scrollIntoView({behavior:'smooth'})，别全局开。 */
+  scroll-behavior:auto;
+  overscroll-behavior:contain;   /* 滚到头不再把滚动传给父级 */
+  contain:layout paint;          /* 滚动内容的重排/重绘关在容器内，不外溢整页 */
+}
+.zone{
+  position:relative;border-radius:var(--r-zone);
+  padding:14px 16px 14px;min-width:0;scroll-margin-top:12px;
+  border:1px solid var(--line);
+  /* 纯色：原来卡片面是 #FCFCFE 而 P0/P1/P2 还各自叠了一层彩色 linear-gradient
+     底纹（琥珀/紫/青 0.05），叠起来就是"发黄/发紫的脏白"。现在全部回到同一个
+     干净白面，分区身份只由左侧 3px 色条承载 —— 干净，而且少一层每帧重算的渐变。 */
+  background:var(--panel);
+  /* 高频更新区：把重排/重绘关在本区块内，不外溢到整页 */
+  contain:layout paint;
+  /* ★ 视口外的分区直接跳过渲染（Chromium 85+）。滚动内容 3800px、366 个节点，
+     开了这个之后只有视口内的区参与绘制。contain-intrinsic-size 给一个估算高度，
+     避免滚动条长度在滚动过程中跳变。老版本浏览器会整条忽略，无副作用。 */
+  content-visibility:auto;
+  contain-intrinsic-size:auto 320px;
+}
+/* 滚动时暂停脉冲动画：滚动本身已经在刷屏，再跑无限动画等于抢主线程 */
+body.scrolling .dot.live,
+body.scrolling .dot.rec,
+body.scrolling .rev-seg.blink{animation:none !important}
+/* 分区识别：**只保留左侧一根色条**。
+   原来每个分区是三件套（左侧色条 + 顶部色线 + 整块彩色底纹），
+   三个分区三种底纹叠在白卡上，整页像被三种脏色冲过一遍。
+   现在只留 3px 色条做身份标识：既有区分度，又让卡片回到同一个干净白面。
+   ★ 色条与顶部色线都是绝对定位，不参与布局，因此不影响任何分区尺寸。 */
+.zone::before{
+  content:'';position:absolute;top:12px;bottom:12px;left:0;width:3px;
+  border-radius:0 3px 3px 0;background:var(--zc,var(--line-2));
+}
+/* （原 .zone::after 顶部色线已移除：与左侧色条重复，还给分区标题上沿多加一道横线。） */
+#zoneP2{grid-column:1/5;--zc:var(--amber)}
+#zoneP1{grid-column:5/7;--zc:var(--violet)}
+#zoneP0{grid-column:1/7;--zc:var(--cyan)}
+#zoneTrend{grid-column:1/7;--zc:var(--blue);display:flex;flex-direction:column}
+#zoneVisual{grid-column:1/7;--zc:var(--teal)}
+#zoneSerial{grid-column:1/4;--zc:var(--slate);display:flex;flex-direction:column}
+#zoneRecord{grid-column:4/7;--zc:var(--red)}
+#zoneSettings{grid-column:1/7;--zc:var(--slate)}
+/* ★ grid-column 归属与区块顺序一律未动。 */
+
+.zone-head{
+  display:flex;align-items:center;gap:9px;margin-bottom:11px;
+  padding-bottom:9px;border-bottom:1px solid var(--line);
+  flex-wrap:wrap;row-gap:4px;
+}
+/* 分区标题：原来 letter-spacing:.14em（中文每字之间塞 2px）→ 中文被拆得松散、
+   反而更难一眼读完。收到 .06em，只留一点呼吸感。 */
+.z-title{font-size:var(--t-lg);font-weight:700;letter-spacing:.06em;color:var(--text);white-space:nowrap}
+.z-meta{font-family:var(--num);font-size:var(--t-micro);color:var(--faint);margin-left:auto;white-space:nowrap;
+  overflow:hidden;text-overflow:ellipsis;min-width:0}
+.ptag,.zone-head::before{
+  font-family:var(--num);font-size:var(--t-sm);font-weight:700;
+  padding:3px 0;min-width:38px;text-align:center;border-radius:6px;letter-spacing:.08em;
+}
+/* 非 P 区的徽标用 CSS ::before 生成 —— **不动 DOM**（自检读的是 DOM 文本，看不到伪元素），
+   目的是让 8 个分区标题的起始 x 对齐：原来只有 P0/P1/P2 有徽标，
+   其余 5 个分区标题整体左移一格，整列标题参差不齐，扫视时"找不到列"。
+   有了它，"这是哪个区"不再依赖读中文标题，扫一眼徽标即可。 */
+#zoneTrend .zone-head::before{content:'TRD';color:var(--blue);background:rgba(29,78,216,.09);border:1px solid rgba(29,78,216,.30)}
+#zoneVisual .zone-head::before{content:'VIS';color:var(--teal);background:rgba(14,138,98,.10);border:1px solid rgba(14,138,98,.30)}
+#zoneSerial .zone-head::before{content:'I/O';color:var(--slate);background:rgba(85,96,112,.09);border:1px solid rgba(85,96,112,.28)}
+#zoneRecord .zone-head::before{content:'REC';color:var(--red);background:rgba(200,30,30,.08);border:1px solid rgba(200,30,30,.26)}
+#zoneSettings .zone-head::before{content:'CFG';color:var(--slate);background:rgba(85,96,112,.09);border:1px solid rgba(85,96,112,.28)}
+.ptag.p0{color:var(--cyan);background:rgba(11,110,168,.09);border:1px solid rgba(11,110,168,.30)}
+.ptag.p1{color:var(--violet);background:rgba(109,40,217,.09);border:1px solid rgba(109,40,217,.30)}
+.ptag.p2{color:var(--amber);background:rgba(154,74,6,.09);border:1px solid rgba(154,74,6,.30)}
+.ptag.vis{color:var(--teal);background:rgba(14,138,98,.10);border:1px solid rgba(14,138,98,.30)}
+
+/* ---------- P2 动力总成 ---------- */
+.hero-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px}
+/* ★ 动力区铺满所在栅格行（2026-10-15，用户反馈「姿态区调整后动力区有一块空白区域」）：
+   #zoneP2{grid-column:1/5} 与 #zoneP1{grid-column:5/7} 是**同一栅格行**，
+   行高由较高的 zoneP1 决定（矢量图进去后更高）→ zoneP2 作为栅格项被拉伸，
+   但它内部的 .hero-grid 不会跟着长，于是底部空出 201px。
+   修法：只改"内部高度怎么分配" —— 分区本身已是 flex 列，让卡片网格吃掉剩余高度，
+   卡片内部用 space-between 把刻度/读数区间拉开（内容一个不少、不裁切）。
+   ★ grid-column 归属与区块顺序**未动**；不涉及任何 transition/will-change。 */
+#zoneP2{display:flex;flex-direction:column}
+#zoneP2 .hero-grid{flex:1;align-content:stretch}
+/* ★ 关键：**不要**用 space-between 分配余量。
+   四张卡的内容不一样（RPM 卡多一行换挡灯、车速卡是表盘），
+   用 space-between 会把"数字"推到各自不同的高度 —— 实测四个读数的 y 差到 100px，
+   横着扫过去根本读不成一行。
+   现在：内容一律从**卡顶**开始排（flex-start），余量交给底部的条形/表盘吃掉
+   （margin-top:auto 把它们压到卡底），于是四张卡的数字落在同一条扫描线上，
+   而条形的高度由样式统一给定 —— 结果可预期，也不再依赖"内容自然高度"。 */
+#zoneP2 .hcard{justify-content:flex-start}
+/* ============================================================================
+ * ★★ 条形仪表的最终形态（产品体验复核 2026-10-16 拍板）：**轻版 22px**
+ * ----------------------------------------------------------------------------
+ * 走过三版（对照图见 tools/ux_pair/对照_条形_三版.png / 对照_整页_三版.png）：
+ *   ① 改前 10px 细线 + 同色浅轨道 —— 条太细，余光读不出量级；温度三段色带分不清；
+ *   ② 曾试 46/52px 实心饱和块 —— 8 张卡同时堆饱和色块，整页观感比改前更重，
+ *      而且用同色浅色当轨道，"填了多少"的边界反而不如细线清楚；
+ *   ③ **轻版 22px + 中性灰轨道(--track) + 降饱和填充** ← 采用。
+ *     · 22px 仍是原来的 2.2 倍，余光能读出"油门到一半 / 温度进红区"；
+ *     · 中性灰槽让填充边界比改前更脆（这是 ② 被否掉的关键）；
+ *     · 填充降一档饱和度，不再抢读数。
+ * ★ 唯一旋钮就是 .bar-track 的高度：
+ *     嫌卡里留白太空就把 22px 调到 30~32px（一行）；余量会等量变成留白，
+ *     因为动力区所在栅格行的高度由**同行的姿态区**决定（见上面 #zoneP2 注释）。
+ * ★ 不再有任何"吃掉剩余高度"的 flex 覆盖 —— 高度是显式的、可预期的。
+ * ========================================================================== */
+#zoneP2 .scard{justify-content:flex-start}
+.hcard{
+  background:var(--panel);border:1px solid var(--line);border-radius:var(--r-card);
+  padding:13px 14px;display:flex;flex-direction:column;min-width:0;
+  transition:border-color .2s;
+}
+.hcard:hover{border-color:var(--line-2)}
+.h-label{font-size:var(--t-sm);letter-spacing:.06em;color:var(--dim);font-weight:600;margin-bottom:6px;
+  white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.h-num{font-family:var(--num);font-size:var(--fs-hero);font-weight:700;line-height:1.05;letter-spacing:-.01em}
+.h-unit{font-size:var(--t-md);color:var(--faint);font-family:var(--num);margin-left:5px;font-weight:600}
+.h-sub{font-family:var(--num);font-size:var(--t-micro);color:var(--faint);margin-top:3px}
+
+/* 车速表盘：表盘画布不参与"拉伸"（半圆 SVG 纵向拉伸会变形），
+   用 flex:1 + 内部居中，把余量变成对称留白。读数已上移到卡顶（.h-num）。 */
+.gauge-wrap{position:relative;flex:1 1 auto;min-height:88px;width:100%;max-width:340px;
+  margin:auto auto 0;display:flex;align-items:flex-end;justify-content:center}
+.gauge-wrap svg{width:100%;height:100%;display:block}
+/* （原 .gauge-mid 及其 .v/.u 已随读数上移一并移除。） */
+.gauge-track{fill:none;stroke:rgba(15,23,42,.10);stroke-width:9;stroke-linecap:round}
+/* 注意：这里刻意不加 filter:drop-shadow —— 20Hz 更新会让 SVG 滤镜每帧重算，实测是卡顿大头 */
+.gauge-fill{fill:none;stroke:var(--cyan);stroke-width:9;stroke-linecap:round;transition:stroke .3s}
+.gauge-tick{stroke:rgba(15,23,42,.32);stroke-width:2}
+/* 刻度文案：与数字同一套等宽字体，11px（全站最小字号），颜色比主读数低一档 ——
+   它只负责"这个弧有多长"，抢不了读数。 */
+.gauge-tick-txt{font-family:var(--num);font-size:11px;font-weight:600;fill:var(--faint)}
+.gauge-hub{fill:#1B2439}
+.gauge-needle{stroke:var(--text);stroke-width:2.5;stroke-linecap:round}
+
+/* 转速换挡灯 */
+.rev-row{display:flex;gap:5px;margin:8px 0 10px}
+.rev-seg{
+  flex:1;height:14px;border-radius:3px;
+  background:var(--panel-3);border:1px solid rgba(15,23,42,.06);
+  /* ★ task-27：换挡灯是 20Hz 更新的元素，这里的过渡必须 ≤50ms（B08 红线）。
+     原来是 `background .1s, box-shadow .1s` —— 100ms > 采样间隔 50ms，
+     每次更新都会把过渡打断重来（"追不上"的拖影），而且 12 段同时动画 box-shadow
+     在软件光栅下是实打实的开销（_t27_perf_probe 里能看到）。现在只留 40ms 背景过渡，
+     辉光保持静态（不影响"亮了没有"的判读）。 */
+  transition:background .04s linear;
+}
+.rev-seg.on.c1{background:var(--teal);border-color:var(--teal);box-shadow:0 0 6px rgba(14,138,98,.40)}
+.rev-seg.on.c2{background:var(--amber);border-color:var(--amber);box-shadow:0 0 6px rgba(154,74,6,.40)}
+.rev-seg.on.c3{background:var(--red);border-color:var(--red);box-shadow:0 0 7px rgba(200,30,30,.45)}
+.rev-seg.on.c3.blink{animation:pulse .5s ease-in-out infinite}
+
+/* 条形仪表（油门/扭矩/温度/电压/电流）
+ * ★ 用 transform:scaleX 而非 width：width 每帧触发布局，20Hz 下就是 200 次/秒；
+ *   transform 只走合成层，主线程零布局开销。过渡 40ms < 采样间隔 50ms，
+ *   不会出现"动画还没走完就被下一次更新打断"的粘滞感（B08）。 */
+/* ★★ 最终采用"轻版"：高度 22px、槽用中性灰 --track、填充降一档饱和度。
+   为什么不是 10px（改前）：条太细，余光读不出量级，温度三段色带也分不清；
+   为什么不是 46px（中间试过）：8 张卡同时堆饱和色块，整页比改前更重。
+   22px 是"够粗能余光读、又不喧宾夺主"的落点；槽取中性灰是为了让填充边界更脆。
+   margin-top:auto 把条形压到卡底 —— 卡顶留给读数，卡底留给条形，8 张卡一致。
+   ★ 只有 transform:scaleX 与 40ms 过渡（B08），没有 will-change。 */
+.bar-track{
+  position:relative;height:22px;border-radius:5px;overflow:hidden;margin-top:auto;
+  background:var(--track);border:1px solid var(--track-line);
+}
+.bar-fill{
+  position:absolute;left:0;top:0;bottom:0;width:100%;border-radius:5px;
+  transform:scaleX(0);transform-origin:left center;
+  transition:transform .04s linear;
+  /* ★ 刻意不写 will-change:transform（2026-10-06 移除）。
+     will-change 是"永久提升为合成层"：条形有十几个，滚动时每张合成层都要
+     参与合成与光栅，软件光栅下是净负担。transform 本身浏览器会按需提升，
+     不写反而更快（实测滚动帧 max 39.6ms -> 见 tools/scroll_probe.py）。 */
+  backface-visibility:hidden;
+}
+.bar-tick{position:absolute;top:-2px;bottom:-2px;width:1px;background:rgba(15,23,42,.42)}
+.bar-scale{display:flex;justify-content:space-between;font-family:var(--num);font-size:var(--t-micro);color:var(--faint);margin-top:4px}
+
+/* 填充色：语义色保留，整体**降一档饱和度**（原值见修复前的 git 历史）
+   —— 峰值色仍是各自语义（绿=正常/油门、琥珀=扭矩/预警、蓝=电压、紫=电流）。 */
+.fill-thr{background:linear-gradient(90deg,rgba(101,163,13,.20),#79A63A)}
+.fill-tq{background:linear-gradient(90deg,rgba(180,83,9,.18),#B26A32)}
+.fill-ok{background:linear-gradient(90deg,rgba(14,159,110,.18),#3E9C7C)}
+.fill-warn{background:linear-gradient(90deg,rgba(180,83,9,.18),#B26A32)}
+/* 危险色不再带发光阴影：22px 的条 + 阴影在浅底上会糊成一团。 */
+.fill-danger{background:linear-gradient(90deg,rgba(200,30,30,.20),#CE5754)}
+.fill-volt{background:linear-gradient(90deg,rgba(37,99,235,.18),#5C82D6)}
+.fill-amp{background:linear-gradient(90deg,rgba(124,58,237,.18),#8F6FD6)}
+/* 温度分区底纹：22px 的条上这三段的边界比改前 10px 清楚得多。
+   跟着填充一起降饱和，避免底纹比填充条还显眼。 */
+.temp-zones{position:absolute;inset:0;display:flex}
+.temp-zones i{display:block;height:100%}
+.temp-zones .z-ok{width:58.3%;background:rgba(14,159,110,.08)}
+.temp-zones .z-warn{width:16.7%;background:rgba(180,83,9,.10)}
+.temp-zones .z-danger{flex:1;background:rgba(200,30,30,.10)}
+
+/* 次级卡片（温度/电压/电流/功率）：降一档面（浅灰），与上面四张白卡形成两级层次 ——
+   一眼就能分出"主读数"和"次要读数"。4 列与上面 4 列对齐（加了功率卡之后正好一行 4 张）。 */
+.sub-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px;margin-top:10px}
+.scard{
+  background:var(--panel-2);border:1px solid var(--line);border-radius:var(--r-card);
+  padding:11px 13px;display:flex;flex-direction:column;min-width:0;
+}
+.s-top{display:flex;align-items:baseline;gap:8px;margin-bottom:8px;flex-wrap:wrap}
+.s-name{font-size:var(--t-sm);letter-spacing:.06em;color:var(--dim);font-weight:600;white-space:nowrap}
+.s-num{font-family:var(--num);font-size:var(--fs-kpi);font-weight:700;margin-left:auto}
+.s-unit{font-size:var(--t-sm);color:var(--faint);font-family:var(--num)}
+.s-state{font-family:var(--num);font-size:var(--t-micro);padding:2px 8px;border-radius:4px;margin-left:6px;align-self:center;white-space:nowrap}
+
+/* ---------- 电池功率卡片（用户需求：>阈值 红色告警）----------
+   ★ 告警必须"一眼可见"：超限时**四处同时转红**（卡片描边、数值、状态标签、条形），
+     在阳光下的余光里也能扫到；只让数字变红不够（赛道边根本来不及盯着看）。
+   ★ 全部靠 class 切换，**没有 transition**：功率以 20Hz 更新，任何 >50ms 的过渡
+     都会在阈值附近拖出红/黑交替的残影（B08 同族问题）。
+   ★ 回差与最短驻留的逻辑在 app.js 的 updatePowerDom()（亮得快、灭得慢）。 */
+.pwr-limit-tick{background:var(--red);width:2px;top:-3px;bottom:-3px}
+.pwr-scale{position:relative}
+.pwr-scale .pwr-limit-lbl{
+  position:absolute;transform:translateX(-50%);white-space:nowrap;
+  color:var(--red);font-weight:700;
+}
+.fill-pwr-ok{background:linear-gradient(90deg,rgba(14,159,110,.18),#3E9C7C)}
+.fill-pwr-near{background:linear-gradient(90deg,rgba(180,83,9,.18),#B26A32)}
+.fill-pwr-over{background:linear-gradient(90deg,rgba(200,30,30,.22),#CE5754)}
+/* 接近上限：琥珀边 + 琥珀数字（提前预警，还没到危险） */
+#pwrCard.pwr-near{border-color:rgba(154,74,6,.55);background:rgba(154,74,6,.05)}
+#pwrCard.pwr-near .s-num,#pwrCard.pwr-near .s-unit,#pwrCard.pwr-near .s-name{color:var(--amber)}
+/* 超限：整张卡转红 */
+#pwrCard.pwr-warn{border-color:var(--red);background:rgba(200,30,30,.07);box-shadow:0 0 0 1px rgba(200,30,30,.25)}
+#pwrCard.pwr-warn .s-num,#pwrCard.pwr-warn .s-unit,#pwrCard.pwr-warn .s-name{color:var(--red)}
+#pwrCard.pwr-warn .s-state{background:var(--red);color:#FFFFFF;border-color:var(--red)}
+#pwrCard .s-state{border:1px solid transparent;font-weight:700}
+/* 峰值保持：一行小字 + 一个"清零"的点击目标（用 button 是为了键盘可达，
+   但样式做成纯文字，不抢功率数字的视觉权重）。 */
+.pwr-peak{
+  display:block;width:100%;text-align:left;padding:0;margin-top:6px;
+  background:none;border:0;cursor:pointer;
+  font-family:var(--num);font-size:var(--t-micro);color:var(--faint);
+}
+.pwr-peak:hover{color:var(--dim)}
+.pwr-peak b{font-weight:700;color:var(--dim)}
+.pwr-peak.pwr-peak-hot,.pwr-peak.pwr-peak-hot b{color:var(--red)}
+
+/* ---------- P1 姿态惯性 ---------- */
+.dyn-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}
+.dcard{
+  background:var(--panel);border:1px solid var(--line);border-radius:12px;
+  padding:11px 13px;display:flex;flex-direction:column;min-width:0;
+}
+.d-top{display:flex;align-items:baseline;justify-content:space-between;gap:6px}
+.d-name{font-size:12px;letter-spacing:.12em;color:var(--dim);font-weight:600;white-space:nowrap}
+.d-num{font-family:var(--num);font-size:var(--fs-sub);font-weight:700;line-height:1.1;margin:4px 0 2px}
+.d-num small{font-size:13px;color:var(--faint);font-weight:500}
+.d-widget{margin-top:auto}
+
+/* 横滚坡度仪 */
+.dial{width:100%;max-height:64px;display:block}
+.dial-track{fill:none;stroke:rgba(15,23,42,.10);stroke-width:9;stroke-linecap:round}
+.dial-zero{stroke:rgba(15,23,42,.30);stroke-width:2;stroke-dasharray:2 3}
+.dial-needle{stroke:var(--violet);stroke-width:3;stroke-linecap:round}
+.dial-hub{fill:var(--violet)}
+/* 俯仰梯（自中心线上/下生长）——同样改用 scaleY，避免每帧改 height 触发布局 */
+.ladder{position:relative;height:52px;border-radius:8px;background:rgba(15,23,42,.045);overflow:hidden}
+.ladder .mid{position:absolute;left:0;right:0;top:50%;height:1px;background:rgba(15,23,42,.22)}
+/* 同上：高频更新元素不用 will-change 常驻合成层 */
+.ladder .half{position:absolute;left:0;right:0;height:50%;transform:scaleY(0);
+  transition:transform .04s linear}
+.ladder .up{bottom:50%;transform-origin:bottom center;
+  background:linear-gradient(0deg,rgba(124,58,237,.55),rgba(124,58,237,.15))}
+.ladder .dn{top:50%;transform-origin:top center;
+  background:linear-gradient(180deg,rgba(124,58,237,.50),rgba(124,58,237,.13))}
+/* 航向带 */
+.tape{position:relative;height:34px;border-radius:8px;background:var(--panel-3);overflow:hidden;margin-top:auto}
+.tape .tk{position:absolute;top:0;bottom:0;width:1px;background:rgba(15,23,42,.16)}
+.tape .tk em{position:absolute;bottom:2px;left:50%;transform:translateX(-50%);
+  font-style:normal;font-family:var(--num);font-size:var(--t-micro);color:var(--dim)}
+/* 两端的刻度标签原来会被 .tape 的 overflow:hidden 各裁掉一半：
+   最左 0° 的标签半边在框外，最右 360° 的实测 "360" 只看得见 "3"。
+   把这两个标签各自往带内挪一点（其余三个刻度不受影响）。 */
+.tape .tk[style*="99%"] em{transform:translateX(-86%)}
+.tape .tk[style*="left:0%"] em{transform:translateX(-14%)}
+/* 航向指针：★ 别用 left 做动画（2026-10-06 改）。
+   left 是布局属性，20Hz 更新 + transition 会让浏览器每秒重排几十次 —— 实测
+   「transition 含布局属性」就这一个，但它是滚动卡顿里最贵的单点之一。
+   做法：指针容器铺满整条带（width:100%），用 transform:translateX(百分比)
+   移动 —— 百分比 translate 是相对元素自身宽度，铺满后 1% == 容器宽度的 1%，
+   语义和原来的 left:百分比 完全一致，但只走合成、不触发布局。
+   真正的 2px 竖线画在 ::before 上。 */
+.tape .ptr{position:absolute;top:0;bottom:0;left:0;width:100%;
+  transform:translateX(0);transition:transform .04s linear;pointer-events:none}
+.tape .ptr::before{content:'';position:absolute;top:0;bottom:0;left:0;width:2px;
+  background:var(--teal);box-shadow:0 0 8px rgba(14,159,110,.55)}
+.tape .ptr::after{content:'';position:absolute;top:-1px;left:-4px;border:5px solid transparent;border-top-color:var(--teal)}
+/* 加速度 G 条（中心零位） */
+.gbar{position:relative;height:52px;border-radius:8px;background:rgba(15,23,42,.045);overflow:hidden;margin-top:4px}
+.gbar .mid{position:absolute;left:50%;top:0;bottom:0;width:1px;background:rgba(15,23,42,.22)}
+.gbar .pos,.gbar .neg{position:absolute;top:0;bottom:0;width:100%;transform:scaleX(0);
+  transition:transform .04s linear}
+.gbar .pos{left:50%;transform-origin:left center;
+  background:linear-gradient(90deg,rgba(14,124,187,.35),var(--cyan))}
+.gbar .neg{right:50%;transform-origin:right center;
+  background:linear-gradient(270deg,rgba(220,38,38,.32),var(--red))}
+.gbar .sc{position:absolute;bottom:2px;font-family:var(--num);font-size:var(--t-micro);color:var(--dim)}
+.raw-chip{
+  /* 只改配色（原先是琥珀色底+琥珀字），**字号/内边距一个都不动**：
+     .raw-chip 在 #zoneP1 .dcard 的 .d-top 里，它的高度决定卡片高度，
+     而 _accvec_move_check 的基线断言四张卡片宽高逐张不变（±1px）。
+     四个"×100 / RAW"琥珀徽标原来一排排地抢眼，改成中性灰后让位给真正的读数。 */
+  font-family:var(--num);font-size:11px;font-weight:700;color:var(--dim);
+  border:1px solid var(--line-2);background:var(--panel-2);
+  border-radius:4px;padding:2px 8px;letter-spacing:.1em;white-space:nowrap;
+}
+/* 趋势图 归一化 / 原始 量程切换 */
+.mode-btn{
+  font-family:var(--ui);font-size:var(--t-sm);font-weight:600;letter-spacing:.04em;
+  color:var(--dim);background:var(--panel-2);border:1px solid var(--line);
+  border-radius:6px;padding:4px 12px;cursor:pointer;transition:.16s;white-space:nowrap;
+}
+.mode-btn:hover{color:var(--text);border-color:var(--line-2);background:var(--panel-3)}
+.mode-btn.on{color:#FFFFFF;font-weight:700;background:var(--teal);border-color:var(--teal)}
+
+/* ---------- P0 ADC 传感 ---------- */
+.adc-grid{display:grid;grid-template-columns:repeat(10,minmax(0,1fr));gap:9px}
+.acard{
+  background:var(--panel);border:1px solid var(--line);border-radius:var(--r-card);
+  padding:10px 11px 9px;display:flex;flex-direction:column;min-width:0;
+  transition:border-color .2s;contain:layout paint;
+}
+.acard:hover{border-color:var(--line-2)}
+.a-top{display:flex;align-items:center;justify-content:space-between;margin-bottom:2px}
+/* 通道号降级（次要信息）：CH01 原来是 13px 加粗纯黑，和下面的读数抢眼；
+   工程师真正要读的是通道名和数值。改成 11px 灰 + 字距，让读数站出来。 */
+.a-ch{font-family:var(--num);font-size:var(--t-micro);font-weight:700;color:var(--faint);letter-spacing:.04em}
+.a-name{font-size:var(--t-sm);color:var(--dim);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;margin-bottom:6px}
+.a-val{font-family:var(--num);font-size:var(--fs-adc);font-weight:700;line-height:1.05;letter-spacing:-.01em}
+/* 数值后面的单位后缀：由第 3 区 ADC_CHANNELS 的 unit 下发，不写死。
+   11px 提到 12px：单位常常就是"这个数是什么"的关键（mm / kg / °），太小容易看漏。 */
+.a-unit{font-family:var(--num);font-size:var(--t-sm);font-weight:600;color:var(--faint);margin-left:3px}
+.a-spark{height:22px;margin-top:6px}
+.a-spark svg{width:100%;height:100%;display:block}
+
+/* ---------- 趋势曲线 ---------- */
+.chip-bar{display:flex;flex-wrap:wrap;gap:4px 6px;margin-bottom:10px;align-items:center}
+/* 组标签：P0 / P1 / P2 用一根左侧竖线分隔，比原来单纯留白更容易分清段落 */
+.chip-g{font-family:var(--num);font-size:var(--t-micro);font-weight:700;color:var(--faint);
+  padding:2px 6px 2px 8px;margin-left:6px;align-self:center;letter-spacing:.1em;
+  border-left:1px solid var(--line-2)}
+.chip-g:first-child{border-left:none;margin-left:0;padding-left:2px}
+/* ★ 未选中的 chip 去掉边框与底色（只留色点 + 文字）：23 个通道挤三行，
+   原来每个都是"白底 + 灰描边 + 圆角"的小盒子 -> 满屏都是盒子，扫不出一条线来；
+   现在未选中的看起来就是一段带色点的文字，选中的才是实心药丸 —— 层级立刻分开。
+   （仍然可点、有 hover 反馈、键盘可达，功能一个不少。） */
+.chip{
+  display:inline-flex;align-items:center;gap:6px;
+  font-family:var(--num);font-size:var(--t-sm);color:var(--dim);
+  background:transparent;border:1px solid transparent;border-radius:999px;
+  padding:3px 9px;cursor:pointer;user-select:none;white-space:nowrap;
+  transition:background .12s,border-color .12s,color .12s;
+}
+.chip:hover{border-color:var(--line);background:var(--panel-2);color:var(--text)}
+.chip .cdot{width:8px;height:8px;border-radius:50%;background:var(--faint);flex:0 0 8px}
+.chip.on{color:#FFFFFF;font-weight:700;background:var(--cc,var(--teal));border-color:var(--cc,var(--teal))}
+.chip.on .cdot{background:rgba(255,255,255,.8)}
+.chart-box{position:relative;flex:1;min-width:0;min-height:160px}
+.chart-box canvas{position:absolute;inset:0;width:100%;height:100%;display:block}
+/* 趋势区：画布 + 右侧「当前值面板」。分析曲线时真正要的是
+   「每条线此刻是多少」，塞在画布末端会 10 路叠成一坨根本读不了。 */
+.trend-wrap{display:flex;gap:10px;align-items:stretch;flex:1;min-height:180px}
+/* 面板高度不再写死 210px：改为跟随画布（align-self:stretch + 去掉 max-height），
+   于是面板上下边缘与曲线画布**精确对齐**，右侧那一列读数也和画布同一高度。 */
+.sig-panel{
+  flex:0 0 212px;overflow-y:auto;overscroll-behavior:contain;
+  border:1px solid var(--line);border-radius:var(--r-card);background:var(--panel);
+  padding:4px 0;align-self:stretch;
+}
+.sig-cap{
+  display:flex;justify-content:space-between;align-items:center;
+  padding:3px 10px 5px;font-size:var(--t-micro);color:var(--faint);
+  border-bottom:1px solid var(--line);margin-bottom:2px;
+}
+.sig-cap b{color:var(--dim);font-weight:700}
+.sig-row{
+  display:flex;align-items:center;gap:6px;padding:4px 10px;
+  font-size:var(--t-sm);line-height:1.35;cursor:pointer;user-select:none;
+}
+.sig-row:hover{background:rgba(8,145,178,.08)}
+.sig-row.hl{background:rgba(8,145,178,.14)}
+.sig-dot{flex:0 0 9px;width:9px;height:9px;border-radius:3px}
+.sig-name{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--dim)}
+/* 数值列定宽 + 右对齐：23 行的数字在**同一竖直线上**对齐，单位跟在后面也对齐 ——
+   否则 0.0 / 24.80 / 6,439 长短不一，整列数字参差，扫视时找不到"这一列是多少"。 */
+.sig-val{font-family:var(--num);font-weight:700;color:var(--text);font-variant-numeric:tabular-nums;
+  min-width:54px;text-align:right}
+.sig-un{font-size:var(--t-micro);color:var(--faint);min-width:26px}
+/* 十字光标层：只画一条竖线 + 时间标签，绝对定位盖在趋势画布上，不吃事件 */
+#cursorCanvas{pointer-events:none}
+/* 框选区间统计浮层（数据分析）：拖拽框选一段曲线后显示区间 min/max/均值 */
+.sel-stats{
+  position:absolute;top:8px;left:52px;z-index:6;
+  background:rgba(255,255,255,.96);border:1px solid var(--line-2);
+  border-radius:9px;padding:7px 11px;font-family:var(--num);font-size:11px;
+  box-shadow:0 6px 18px rgba(15,23,42,.16);max-width:340px;pointer-events:none;
+  color:var(--dim);line-height:1.7;
+}
+.sel-stats .ss-range{font-weight:700;color:var(--text);margin-bottom:3px;font-size:12px;letter-spacing:.02em}
+.sel-stats .ss-row{display:flex;align-items:center;gap:6px;white-space:nowrap}
+.sel-stats .ss-dot{width:8px;height:8px;border-radius:50%;flex:0 0 8px}
+.sel-stats .ss-name{color:var(--dim);flex:0 0 auto}
+.sel-stats .ss-v{color:var(--text);font-weight:600}
+/* 暂停角标：冻结时画在趋势图左上角 */
+.pause-tag{
+  position:absolute;top:8px;left:10px;z-index:6;pointer-events:none;
+  font-family:var(--ui);font-size:12px;font-weight:700;color:#0E9F6E;
+  background:rgba(255,255,255,.9);border:1px solid rgba(14,159,110,.4);
+  border-radius:6px;padding:3px 9px;
+}
+
+/* ---------- 标签页切换（导航点击只显示当前功能区） ---------- */
+.zone.hidden{display:none}
+/* 功能区拖拽调高度手柄 */
+.zone-resize{
+  position:absolute;left:0;right:0;bottom:0;height:8px;cursor:ns-resize;z-index:3;
+}
+.zone-resize::after{
+  content:'';position:absolute;left:50%;bottom:2px;transform:translateX(-50%);
+  width:36px;height:3px;border-radius:2px;background:rgba(15,23,42,.16);
+}
+.zone-resize:hover::after{background:var(--teal)}
+
+/* ---------- 数据可视化工作台 ---------- */
+/* （.ptag.vis 的样式已并入上面分区标题徽标那一组，避免两处各写一遍。） */
+/* 加速度矢量图（在「总览 → 姿态与惯性」#zoneP1 内，可用宽度约 459px）：
+   ★ 本次排版重做的地方：三个读数原来是**竖着三行**（横向/纵向/合成），
+     每行都是"标签 64px + 数值 62px 右对齐"，占掉 5 行文字（约 100px 高），
+     而且三行读数彼此错开、数值列窄到 "3533.73" 快贴边 —— 竖着读不出"哪个大"。
+     现在：画布 112px 在左，右侧是一条**三列 KPI**（标签在数字上方，横向并排），
+     一行就能比较"横向/纵向/合成"的大小关系；单位从"只有横向那行有"
+     挪到标题行（三路同单位，写三次才是噪声）。
+     整个面板因此变矮约 12px —— 同栅格行由 #zoneP1 撑高，动力区那块空白同步变小。
+   ★ 不加 transition、不加 will-change（B08）；画布尺寸走 createLayer/syncLayer
+     同一套 DPR 处理；重绘仍是 accVecDirty 脏标记 + 离散调用，零每帧开销。 */
+.accvec{
+  display:flex;align-items:center;gap:12px;min-width:0;
+  border:1px solid var(--line);border-radius:var(--r-card);background:var(--panel);
+  padding:8px 12px;margin-bottom:10px;
+}
+.accvec-canvas{flex:0 0 112px;width:112px;height:112px;display:block}
+.accvec-side{
+  flex:1;min-width:0;display:grid;grid-template-columns:repeat(3,minmax(0,1fr));
+  gap:4px 10px;align-content:center;
+}
+.accvec-cap{
+  grid-column:1/-1;display:flex;align-items:center;gap:6px;
+  font-size:var(--t-micro);color:var(--faint);letter-spacing:.04em;margin-bottom:2px;
+}
+.accvec-chip{
+  font-family:var(--num);font-size:var(--t-micro);font-weight:700;color:var(--dim);
+  border:1px solid var(--line-2);border-radius:4px;padding:0 5px;
+}
+/* 每个 KPI：第一行"色点 + 标签"，第二行大数字（占满两列） */
+.accvec-row{display:grid;grid-template-columns:9px minmax(0,1fr);gap:1px 5px;min-width:0}
+.accvec-dot{width:9px;height:9px;border-radius:50%;align-self:center}
+.accvec-row .accvec-k{
+  font-size:var(--t-micro);color:var(--faint);white-space:nowrap;
+  overflow:hidden;text-overflow:ellipsis;
+}
+.accvec-row b{
+  grid-column:1/-1;font-family:var(--num);font-size:18px;font-weight:700;color:var(--text);
+  line-height:1.15;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;
+  font-variant-numeric:tabular-nums;
+}
+.accvec-u{font-size:var(--t-micro);color:var(--faint)}
+.accvec-note{grid-column:1/-1;font-size:var(--t-micro);color:var(--faint);margin-top:1px}
+.vis-wrap{display:flex;gap:12px;align-items:flex-start}
+.vis-channels{
+  flex:0 0 168px;border:1px solid var(--line);border-radius:var(--r-card);
+  background:var(--panel);padding:6px 0;max-height:560px;overflow-y:auto;
+}
+.vis-channels .vc-cap{font-size:var(--t-micro);color:var(--faint);padding:3px 10px 6px;border-bottom:1px solid var(--line);margin-bottom:2px;letter-spacing:.06em}
+.vis-channels .vc-item{
+  display:flex;align-items:center;gap:7px;padding:4px 10px;
+  font-size:var(--t-sm);color:var(--dim);cursor:grab;user-select:none;
+  border-radius:4px;
+}
+.vis-channels .vc-item:hover{background:rgba(8,145,178,.08);color:var(--text)}
+.vis-channels .vc-item:active{cursor:grabbing}
+.vis-channels .vc-item .vc-dot{width:8px;height:8px;border-radius:50%;flex:0 0 8px}
+.vis-grid{
+  flex:1;display:flex;flex-wrap:wrap;gap:12px;align-items:flex-start;min-width:0;
+}
+.vchart{
+  background:var(--panel);border:1px solid var(--line);border-radius:var(--r-card);
+  padding:8px 10px 10px;min-width:0;
+  width:460px;height:268px;
+  resize:both;overflow:hidden;              /* 右下角拖拽调整组件大小 */
+  display:flex;flex-direction:column;
+}
+.vchart.dragover{border-color:var(--teal);box-shadow:0 0 0 2px rgba(14,138,98,.18)}
+.vc-head{display:flex;align-items:center;gap:8px;margin-bottom:6px}
+.vc-title{font-size:var(--t-sm);font-weight:700;color:var(--dim);flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.vc-del{
+  flex:0 0 auto;width:22px;height:22px;border:1px solid var(--line);border-radius:5px;
+  background:var(--panel-2);color:var(--faint);cursor:pointer;font-size:14px;line-height:1;
+  padding:0;display:flex;align-items:center;justify-content:center;
+}
+.vc-del:hover{color:var(--red);border-color:var(--red)}
+.vc-canvas-wrap{position:relative;flex:1;min-height:120px}
+.vc-canvas{position:absolute;inset:0;width:100%;height:100%;display:block}
+.vc-empty{
+  position:absolute;inset:0;display:flex;align-items:center;justify-content:center;
+  font-size:var(--t-sm);color:var(--faint);pointer-events:none;
+}
+.vc-sigs{display:flex;flex-wrap:wrap;gap:4px;margin-top:6px}
+.vc-sig{
+  display:inline-flex;align-items:center;gap:4px;font-family:var(--num);font-size:var(--t-micro);
+  color:var(--text);background:var(--panel-2);border:1px solid var(--line);
+  border-radius:4px;padding:1px 7px;
+}
+.vc-sig .vc-dot{width:6px;height:6px;border-radius:50%}
+
+/* ---------- 底部状态栏 ----------
+   ★ 高度仍是 30px（_replay_bar_check 明确断言），只改字号与配色：
+     底栏原来是 10px + #6B7686，是全页最小的字 + 最低的对比度；
+     但它恰恰是"现在到底通没通、帧率多少"的落点。提到 11px（全站下限）
+     并把数字提亮到 --text，静态宽度只涨约 6%（实测窄窗 1280 下仍不出现省略号）。 */
+#footer{
+  flex:0 0 30px;border-top:1px solid var(--line);
+  display:flex;align-items:center;gap:14px;padding:0 16px;
+  font-family:var(--num);font-size:var(--t-micro);color:var(--faint);
+  background:var(--panel);overflow:hidden;white-space:nowrap;
+}
+#footer .sep{color:var(--line-2)}
+#footer b{color:var(--text);font-weight:700}
+#footer .foot-opt{overflow:hidden;text-overflow:ellipsis}
+/* ★ 底栏计数位宽锁定（task-8 F2 / F6）：
+   #fpsTag / #rxFoot 每秒变一次数字，不锁位宽会把它后面的**所有**底栏项一起左右推，
+   其中就包括用户正在拖的**回放进度条** —— 实测 rxFoot 从 "0" 变 "123456" 时，
+   其后底栏项整体右移 29px，直接加重"拉进度条时不便于观察"的抱怨。
+   ★ F6 修正：宽度只按**现实取值**预留，不按极端值。FPS 由 trendFps 决定（几十量级）
+     → 3ch 足够；RX 是每秒 payload 元素数（20Hz×3 ≈ 60；115200 波特率上限约 400；
+     921600 下约 3000）→ 4ch 覆盖到 9999。这比上一版 6ch 少占约 13px 静态宽度，
+     把"锁位宽"带来的既有元素静态位移压到最小（F6 的修正）。
+   ch 单位在等宽底栏字体（--num）下就是数字宽度，锁得准；text-align:right 让数字
+   紧贴后面的 " f/s"，空档留在标签一侧，视觉上不别扭。 */
+#fpsTag,#rxFoot{display:inline-block;text-align:right}
+#fpsTag{min-width:3ch}
+#rxFoot{min-width:4ch}
+
+/* ---------- 功能分区（串口/记录/设置） ---------- */
+#zoneSerial{grid-column:1/4;display:flex;flex-direction:column}
+#zoneRecord{grid-column:4/7}
+#zoneSettings{grid-column:1/7}
+.ctl-row{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:10px}
+.ctl-row:last-child{margin-bottom:0}
+.ctl-row label{font-size:var(--t-sm);color:var(--dim);white-space:nowrap}
+/* ★ 下拉框原来没有最小宽度：浏览器按最长选项给宽度，"端口" 那一栏窄得像一条缝，
+   和旁边 32px 高的按钮不成比例。给下拉一个统一的最小宽度（触摸/手套也好点）。 */
+.sel{min-width:104px}
+.sel,.inp{
+  background:var(--panel);border:1px solid var(--line-2);border-radius:var(--r-ctl);
+  color:var(--text);font-family:var(--num);font-size:var(--t-md);padding:6px 10px;outline:none;min-width:0;
+  min-height:32px;
+}
+.sel:focus,.inp:focus{border-color:rgba(15,23,42,.42);box-shadow:0 0 0 3px rgba(11,110,168,.12)}
+.inp.grow{flex:1 1 160px}
+.inp.num{width:90px}
+.btn{
+  font-family:var(--ui);font-size:var(--t-md);font-weight:600;color:var(--text);
+  background:var(--panel-2);border:1px solid var(--line-2);border-radius:var(--r-ctl);
+  padding:6px 16px;min-height:32px;cursor:pointer;white-space:nowrap;
+  transition:background .15s,border-color .15s,transform .08s;
+}
+.btn:hover{border-color:rgba(15,23,42,.40);background:var(--panel-3)}
+.btn:active{transform:translateY(1px)}
+.btn.primary{background:#1B2439;color:#FFFFFF;border-color:#1B2439}
+.btn.primary:hover{background:#31405A}
+
+/* 2026-10-06 移除：.rng-grid / .rng-row / .cfg-origin 整套样式随「量程与单位」
+   在线编辑器一起删掉了（界面已无这些元素）。需要恢复时看 git/备份。 */
+
+/* （EXT 角标 .rng-row.ext 与 .btn.danger 已随编辑器一并移除。
+    .btn 基类仍被串口/记录区的按钮使用，保留。） */
+
+/* HEX 监视器：v2.7 用「60 个节点池 + column-reverse」省掉了读 scrollHeight，
+   但 column-reverse 的滚动容器在 Chromium 里回看历史时行为很怪（滚动锚定反向），
+   且每 200ms 重写 60 个节点文本 = 持续把整块 flex 布局打脏，滚动时被反复 invalidate
+   —— 这就是「滚动卡顿 / 滑动 HEX 会死机」的主源。
+   现在：单个 <pre> 一次 textContent 写入（60 次 DOM 写 -> 1 次），正常方向排列，
+   只有「本来就贴在底部」时才自动滚到底，回看历史完全不被打断。
+
+   ★★ max-height 是「接受数据时串口助手乱跳动」的根治（2026-10-14 实测定位）：
+   原来只有 `flex:1;min-height:120px`、**没有上界**。而 #zoneSerial 是
+   `display:flex;flex-direction:column` 的网格项、默认高度是内容驱动的 ——
+   flushHex 每 200ms 把 <pre> 整体重写成「这 200ms 内累积的那几行」，
+   行数随数据速率上下浮动，于是 <pre> 高度浮动 -> hexBox 浮动 -> zoneSerial 浮动
+   -> 同一个网格行里的 #zoneRecord 跟着浮动 -> 整页滚动高度浮动。
+   离屏实测（每轮喂 1~55 行、模拟 200ms 一批）：hexBox 高度 120…1046（振幅 926），
+   zoneSerial 286…1212 —— 这就是用户说的「乱跳动」。
+   加上 max-height:120px 之后振幅 = 0，内容超出改为在框内滚动（overflow-y:auto 本来就是为它写的）。
+
+   ★ 为什么还要下面那条 [style*="height"] 覆盖：B07 明确要求「拖动功能区手柄后
+   HEX 区跟着变」。用户一旦手动拉高该区（initZoneResize 会写内联 style.height），
+   容器高度变成确定值，此时必须解除 max-height 让 flex:1 把它填满并内部滚动。
+   实测：不加覆盖 -> 拉到 500px 后 hexBox 仍卡在 120（B07 回归）；
+   加上覆盖 -> hexBox 334 / clientHeight 332 < scrollHeight（填满并内部滚动）。 */
+.hexbox{
+  flex:1;min-height:120px;max-height:120px;overflow-y:auto;overscroll-behavior:contain;overflow-anchor:none;
+  background:var(--panel-2);border:1px solid var(--line);
+  border-radius:var(--r-card);padding:8px 12px;font-family:var(--num);font-size:var(--t-sm);line-height:1.6;
+  color:var(--dim);margin-bottom:10px;
+}
+/* 用户手动拉高该功能区（内联 height）-> 解除上限，恢复 B07 的"填满并滚动"行为 */
+#zoneSerial[style*="height"] .hexbox{max-height:none}
+.hexpre{margin:0;font:inherit;white-space:pre;word-break:normal}
+.hex-line.tx{color:var(--teal);font-weight:700}
+.hex-idle{color:var(--faint);padding:8px 0}
+.loglist{
+  max-height:206px;overflow-y:auto;border:1px solid var(--line);border-radius:var(--r-card);padding:4px 12px;
+  background:var(--panel);
+}
+/* ★ 记录区同理铺满（同栅格行被 zoneSerial 撑高 → 底部空 140px）。
+   只让日志列表吃掉剩余高度（列表本来就是滚动容器，拉长只是"多显示几条"）。
+   ★ 与上面 hexbox 的 max-height:120px 是两件事，互不影响。 */
+#zoneRecord{display:flex;flex-direction:column}
+#zoneRecord .loglist{flex:1;max-height:none}
+.log-item{display:flex;align-items:center;justify-content:space-between;gap:10px;
+  padding:8px 0;border-bottom:1px solid var(--line)}
+.log-item:last-child{border-bottom:none}
+.log-item .nm{font-size:var(--t-sm);color:var(--text);font-family:var(--num);
+  overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.log-item .mt{font-size:var(--t-micro);color:var(--faint);margin-top:2px}
+.log-item .btn{padding:3px 12px;font-size:var(--t-micro)}
+.chk{display:flex;align-items:center;gap:7px;font-size:var(--t-sm);color:var(--text);cursor:pointer}
+.chk input{accent-color:var(--teal);width:15px;height:15px}
+.hint{font-size:var(--t-micro);color:var(--faint)}
+/* ---------- 底栏里的回放控制组（问题一：进度条移到底栏；问题四：回放暂停） ----------
+   ★ 底栏是 flex:0 0 30px 的固定高：这里所有东西都必须塞进 30px，
+     滑块 6px 轨 + 13px 滑钮、按钮 22px 高，与既有文字同一行居中。
+   ★ 全部 flex:0 0 auto —— 底栏里既有文字（FPS/RX/帧率/协议）的宽度一个都不许被挤动。
+   ★ 不加 transition（回包 100ms 一次，过渡只会让滑块"追不上"，同 B08 的坑）、
+     不加 will-change（10Hz 的控件不值得常驻合成层）。 */
+.rp-group{display:inline-flex;align-items:center;gap:8px;flex:0 0 auto}
+.rp-btn{
+  flex:0 0 auto;width:26px;height:22px;padding:0;
+  display:inline-flex;align-items:center;justify-content:center;
+  font-family:var(--ui);font-size:var(--t-sm);line-height:1;color:var(--text);
+  background:var(--panel-2);border:1px solid var(--line-2);border-radius:6px;cursor:pointer;
+}
+.rp-btn:hover:not(:disabled){border-color:rgba(15,23,42,.40);background:var(--panel-3)}
+.rp-btn:disabled{opacity:.4;cursor:not-allowed}
+/* 已暂停：按钮反色，和顶栏 freezeBtn 的"已暂停"观感一致，但文案独立 */
+.rp-btn[aria-pressed="true"]{background:#1B2439;border-color:#1B2439;color:#FFFFFF}
+.replay-range{
+  -webkit-appearance:none;appearance:none;flex:0 0 170px;width:170px;height:6px;
+  background:var(--panel-3);border:1px solid var(--line-2);border-radius:999px;
+  outline:none;cursor:pointer;
+}
+.replay-range::-webkit-slider-thumb{
+  -webkit-appearance:none;appearance:none;width:14px;height:14px;border-radius:50%;
+  background:#1B2439;cursor:pointer;
+}
+.replay-range:disabled{opacity:.45;cursor:not-allowed}
+/* 位置标签：跟随底栏字号；锁 min-width，秒数变宽时数字不在底栏里左右跳 */
+#replayPos{font-family:var(--num);font-size:var(--t-micro);white-space:nowrap;min-width:80px;text-align:right}
+
+/* ---------- Toast：替代 alert 的非阻塞提示 ----------
+ * alert() 会同步阻塞渲染进程的消息循环（界面"冻一下"），且在 QtWebEngine 里
+ * 默认没有对话框实现，提示常常直接消失。Toast 只做 transform/opacity 动画，
+ * 走合成层，不阻塞、不打断数据。 */
+#toastWrap{
+  position:fixed;right:18px;bottom:46px;z-index:9999;
+  display:flex;flex-direction:column;align-items:flex-end;gap:8px;
+  pointer-events:none;max-width:min(420px,calc(100vw - 36px));
+}
+.toast{
+  pointer-events:auto;display:flex;align-items:flex-start;gap:9px;
+  background:#161F2C;color:#F2F5FA;border-radius:var(--r-card);
+  padding:10px 13px;font-size:var(--t-sm);line-height:1.5;font-family:var(--ui);
+  box-shadow:0 8px 24px rgba(15,23,42,.22);
+  border-left:3px solid var(--cyan);
+  opacity:0;transform:translateY(10px) scale(.97);
+  transition:opacity .18s ease,transform .18s cubic-bezier(.2,.8,.3,1);
+  max-width:100%;
+}
+.toast.show{opacity:1;transform:translateY(0) scale(1)}
+.toast.out{opacity:0;transform:translateY(6px) scale(.98)}
+.toast.ok{border-left-color:var(--teal)}
+.toast.warn{border-left-color:var(--amber)}
+.toast.err{border-left-color:var(--red)}
+.toast .ti{font-family:var(--num);font-size:var(--t-md);line-height:1.3;flex:0 0 auto}
+.toast .tx{min-width:0;word-break:break-word}
+
+/* ============================================================
+ * 响应式：1440 桌面 -> 1280 笔记本 -> 1024 小窗 -> 820 平板/竖屏
+ * 断点只做三件事：改列数、改导航形态、收起次要信息
+ * ============================================================ */
+@media (max-width:1280px){
+  .adc-grid{grid-template-columns:repeat(5,minmax(0,1fr))}
+  .z-meta{display:none}
+}
+@media (max-width:1080px){
+  #stage{grid-template-columns:repeat(2,minmax(0,1fr));padding:12px}
+  #zoneP2,#zoneP1,#zoneP0,#zoneTrend,#zoneVisual,#zoneSerial,#zoneRecord,#zoneSettings{grid-column:1/3}
+  .hero-grid{grid-template-columns:repeat(2,minmax(0,1fr))}
+  .adc-grid{grid-template-columns:repeat(5,minmax(0,1fr))}
+  .sub-grid{grid-template-columns:repeat(2,minmax(0,1fr))}
+  .z-meta{display:inline}
+  #topbar{gap:8px;padding:0 12px}
+  #rxPill{display:none}
+}
+@media (max-width:820px){
+  /* 导航从左侧竖条改成底部横条：竖屏时把宽度全部让给仪表 */
+  #app{flex-direction:column}
+  #main{order:1;min-height:0}
+  #rail{
+    order:2;width:auto;flex:0 0 auto;flex-direction:row;
+    justify-content:space-around;align-items:stretch;gap:2px;
+    border-right:none;border-top:1px solid var(--line);
+    padding:4px 4px calc(4px + env(safe-area-inset-bottom));overflow:visible;
+  }
+  .logo-sq{display:none}
+  .rail-item{width:auto;flex:1 1 0;min-height:40px;padding:5px 2px;font-size:var(--t-micro)}
+  .rail-item .ic{font-size:15px;margin-bottom:1px}
+  #stage{grid-template-columns:minmax(0,1fr);padding:10px}
+  #zoneP2,#zoneP1,#zoneP0,#zoneTrend,#zoneVisual,#zoneSerial,#zoneRecord,#zoneSettings{grid-column:1/2}
+  .hero-grid{grid-template-columns:minmax(0,1fr)}
+  .sub-grid{grid-template-columns:minmax(0,1fr)}
+  .dyn-grid{grid-template-columns:repeat(2,minmax(0,1fr))}
+  .adc-grid{grid-template-columns:repeat(2,minmax(0,1fr))}
+  #topbar{height:auto;flex:0 0 auto;min-height:48px;padding:8px 12px;flex-wrap:wrap}
+  .brand .sub{display:none}
+  #clock{display:none}
+  .tag-preview{display:none}
+  .chart-box{height:180px}
+  #footer{gap:10px;padding:0 12px}
+  #footer .foot-opt{display:none}
+  #toastWrap{right:10px;left:10px;bottom:68px;align-items:stretch}
+  .btn,.sel,.inp{min-height:36px}          /* 触摸目标 ≥36px */
+  .pill{padding:5px 11px}
+  .chip{padding:5px 11px}
+}
+@media (max-width:520px){
+  .adc-grid{grid-template-columns:minmax(0,1fr)}
+  .dyn-grid{grid-template-columns:minmax(0,1fr)}
+  .rail-item{font-size:0}
+  .rail-item .ic{font-size:17px;margin-bottom:0}
+  .rail-item{min-width:36px}
+}
+
+/* ===========================================================================
+   ★ 滚动性能补丁（2026-10-06 · 实测依据见 tools/scroll_probe.py）
+   ---------------------------------------------------------------------------
+   实测（Chromium 1500x1000，每档 3 秒）：
+     静止 + 数据      Layout 15.7 ms/s  主线程 147 ms/s  jank 0%    max  9.0 ms
+     滚动 + 数据      Layout 15.7 ms/s  主线程 225 ms/s  jank 1.7%  max 39.6 ms
+     滚动 + 冻结数据  Layout  0.3 ms/s  主线程 159 ms/s  jank 0.3%  max 25.1 ms
+   → 滚动本身并不贵（冻结数据后 Layout 掉 98%）；贵的是 20Hz 的 DOM 更新，
+     它每秒制造约 19 次布局 —— 正好卡在滚动的每一帧上，这就是"卡"的来源。
+   对策：
+   1) 高频数字容器 contain:layout —— 文本变化只在该元素内部重排，不外溢祖先链；
+      tabular-nums 让数字等宽，位数不变时宽度不抖。
+   2) 滚动期间关掉条形的 transform 过渡：20Hz 更新 + 90ms 过渡 = 元素永久
+      处于动画态，每帧都要插值。（JS 侧同时降频，见 app.js 主循环）
+   =========================================================================== */
+.h-num,.s-num,.a-val,.sig-val,#speedNum,.accvec-row b,#pwrNum,#replayPos,#clock{
+  contain:layout;font-variant-numeric:tabular-nums;
+}
+body.scrolling .bar-fill,
+body.scrolling .ladder .half,
+body.scrolling .gbar .pos,
+body.scrolling .gbar .neg{transition:none !important}
+
+/* 尊重系统的"减少动效"设置：关掉脉冲/呼吸/平滑滚动 */
+@media (prefers-reduced-motion:reduce){
+  *{animation-duration:.001ms !important;animation-iteration-count:1 !important;
+    transition-duration:.001ms !important;scroll-behavior:auto !important}
+}
+
+/* ============================================================================
+ * ★★ task-27 落地：B「数据表」总体设计 + A 的环形车速/转速（亮色）
+ * ----------------------------------------------------------------------------
+ * 这一段放在 <style> 末尾，靠**后置同优先级覆盖**改版式，不动上面既有规则 ——
+ * 好处是每一处改动都能一眼看出"改了什么"，回退只需删掉本段。
+ *
+ * 三件事：
+ *  1) 动力区/姿态区**改成整宽带**：`#zoneP2`、`#zoneP1` 各占整行（原 P2 列1-4、
+ *     P1 列5-6 同行 → 行高 = max(两者自然高)，P2 必然多出 160+px 无处可去）。
+ *     这是解开留白那道**结构性耦合**的关键，不是样式微调。
+ *  2) 动力区内部改**12 列优先级网格**（格子大小 = 重要性），每格都带
+ *     "数值 + 单位 + 阈值/峰值/近 30 s 热条"，取消 4+4 张同构卡。
+ *  3) 车速/转速改 **canvas 环形表**（中心数值仍是 DOM，便于 20Hz 节流更新与探针取节点）。
+ *
+ * ★ 性能：本段没有任何 transition（回包/数值都是 20Hz）、没有 will-change、
+ *   没有 content-visibility；环形/热条/散点/双轴全部"标脏 → 主循环按节流重绘"。
+ * ========================================================================== */
+
+/* 1) 两个区各占整行（分区顺序与数量不变：P2 P1 P0 Trend Visual Serial Record Settings） */
+#zoneP2{grid-column:1/7}
+#zoneP1{grid-column:1/7}
+#zoneP2 .zone-head,#zoneP1 .zone-head{border-bottom-color:var(--line)}
+
+/* 2) 动力区：12 列优先级网格 */
+.sheet{display:grid;grid-template-columns:repeat(12,minmax(0,1fr));gap:10px;align-items:stretch}
+.sheet > .hcard,.sheet > .scard,.sheet > .xcard{grid-column:span 3}
+.sheet > .hero{grid-column:span 3;grid-row:span 2}
+.sheet > .span2{grid-column:span 2}
+.sheet > .span4{grid-column:span 4}
+.sheet > .span6{grid-column:span 6}
+.hcard,.scard,.xcard{
+  background:var(--panel-2);border:1px solid var(--line);border-radius:10px;
+  padding:10px 12px 11px;display:flex;flex-direction:column;min-width:0;
+  /* ★ contain:layout paint：格子内部的变化不外溢（同 .acard 的做法）。
+     20Hz 数值更新 + 4Hz 热条重写只影响本格，避免整块 .sheet 反复重排。 */
+  contain:layout paint;
+}
+.xcard{min-height:96px}
+.hcard:hover{border-color:var(--line-2)}
+/* 格子内的三层文字：cap（名称/状态/阈值）→ 数值 → 图形/条 */
+.cap{display:flex;align-items:baseline;gap:6px;min-width:0}
+.cap .nm{font-size:var(--t-sm);font-weight:600;color:var(--dim);white-space:nowrap;
+  overflow:hidden;text-overflow:ellipsis}
+.cap .st{font-family:var(--num);font-size:var(--t-micro);font-weight:700;color:var(--c-ok,#0E8A62)}
+.cap .st.is-warn{color:var(--c-warn,#B4783F)}
+.cap .st.is-over{color:var(--c-over,#C8393B)}
+.cap .lim{font-family:var(--num);font-size:var(--t-micro);color:var(--faint);margin-left:auto;
+  white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.cap.foot{margin-top:4px;font-family:var(--num);font-size:var(--t-micro);color:var(--faint)}
+.cap.foot span{flex:0 0 auto}
+.cap.foot span:nth-child(2){margin:0 auto;color:var(--faint)}
+.big-num{display:flex;align-items:baseline;gap:5px;margin:2px 0 6px;font-family:var(--num)}
+.big-num > span:first-child{font-size:34px;font-weight:700;line-height:1.02;letter-spacing:-.01em}
+.big-num.sm > span:first-child{font-size:25px}
+.big-num .u{font-size:var(--t-sm);font-weight:600;color:var(--faint)}
+
+/* 2a) 环形表（canvas 画图形，中心数值是 DOM —— 20Hz 更新只写 textContent） */
+/* ★ task-28：环径原来被**高度**卡死（drawRingGauge 里 R = min(w/2-8, cy-6, h-cy-6)，
+   h=118 → R≈48 → 内径仅 81px），而中心数字是固定 38px（"4,250" 实测 111px 宽）
+   → 两侧各超出约 30px、单位 m/s 骑在绿弧上。卡内还有纵向余量，
+   所以**优先把环画大**而不是把字压小：min-height 118 → 150px（R 48 → 63，内径 81 → 106），
+   再配合 app.js 的 fitRingVal() 用 measureText 反算字号兜底。 */
+.ring{position:relative;flex:1;min-height:150px;margin:2px 0 6px}
+.ring-cv{position:absolute;inset:0;width:100%;height:100%;display:block}
+.mini-cv{width:100%;height:96px;display:block;margin-top:auto}
+.ring-val{position:absolute;left:0;right:0;top:50%;transform:translateY(-52%);text-align:center;
+  pointer-events:none}
+.ring-val .v{font-family:var(--num);font-size:38px;font-weight:700;line-height:1;letter-spacing:-.01em}
+/* ★ 单位**另起一行**放数字正下方（原来是与数字同行的 inline span，正好骑在弧线上） */
+.ring-val .u{display:block;font-family:var(--num);font-size:var(--t-sm);font-weight:600;
+  color:var(--faint);margin-top:1px}
+.ring-val.is-over .v{color:var(--c-over,#C8393B)}
+.ring-val.is-warn .v{color:var(--c-warn,#B4783F)}
+
+/* 2b) 条形：轻版（22px 中性灰槽 + 降饱和填充），大格用 26px
+   ★ 必须先抵消 task-24 那条"让条形吃满余量"的 flex 覆盖（flex:1 1 auto + min/max-height），
+     否则 height:22px 会被 min-height:44px 顶回去 —— 这正是"治标"留下的痕迹。 */
+#zoneP2 .hcard .bar-track,#zoneP2 .scard .bar-track,.xcard .bar-track{
+  flex:0 0 auto;min-height:0;max-height:none}
+.bar-track{height:22px;border-radius:5px;background:var(--track);border:1px solid var(--track-line);
+  margin-top:auto}
+.bar-track.big{height:26px}
+.bar-fill{border-radius:5px}
+/* 分段观感：用重复渐变在槽上"切段"（仍是现有 .bar-fill + transform:scaleX 机制，零 JS 改动） */
+.bar-track.seg{background-image:repeating-linear-gradient(90deg,transparent 0 7px,var(--panel-2) 7px 9px)}
+.fill-speed{background:linear-gradient(90deg,rgba(11,110,168,.20),#3E93C4)}
+/* 阈值/峰值刻线：既有 .bar-tick 机制，只调位置与颜色 */
+.bar-tick{background:rgba(20,28,41,.42)}
+#rpmLimitTick,#ampLimitTick,#tempHotTick{background:var(--c-over,#C8393B);width:2px;top:-3px;bottom:-3px}
+
+/* 2c) 历史热条（30 段近 30 s；只在 250ms 节流点重写，且内容不变则跳过） */
+.heat{display:flex;align-items:flex-end;gap:1px;height:22px;margin-top:auto;min-height:22px}
+.heat i{flex:1;border-radius:1px;min-height:2px;background:var(--teal);opacity:.45}
+
+/* 3) 姿态区：整宽带 + 同样用 12 列网格（矢量图 span4，四张卡各 span2） */
+.dyn{display:grid;grid-template-columns:repeat(12,minmax(0,1fr));gap:10px;align-items:stretch}
+.dyn > #accVec{grid-column:span 4}
+.dyn > .dcard{grid-column:span 2}
+#accVec{margin-bottom:0}
+.dcard{background:var(--panel-2);border:1px solid var(--line);border-radius:10px;padding:10px 12px}
+.d-widget{margin-top:auto}
+
+/* 4) 传感通道：由 10 张大卡改成**密集行式**（一行 4~5 个通道，每行 = 通道/名称/数值/迷你趋势） */
+.adc-grid{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:6px 12px}
+.acard{background:transparent;border:none;border-bottom:1px solid var(--line);border-radius:0;
+  padding:5px 2px;display:grid;grid-template-columns:38px 1fr auto;grid-template-rows:auto auto;
+  align-items:center;gap:0 8px;contain:layout paint;transition:none}
+.acard:hover{border-color:var(--line)}
+.a-top{grid-column:1/2;grid-row:1/3;display:block;margin:0}
+.a-ch{font-size:var(--t-micro);font-weight:700;color:var(--faint);letter-spacing:.02em}
+.a-name{grid-column:2/3;grid-row:1/2;font-size:var(--t-sm);color:var(--dim);
+  white-space:nowrap;overflow:hidden;text-overflow:ellipsis;margin:0}
+.a-val{grid-column:2/3;grid-row:2/3;font-family:var(--num);font-size:17px;font-weight:700;line-height:1.15}
+.a-unit{font-size:var(--t-micro);font-weight:600;color:var(--faint);margin-left:3px}
+.a-spark{grid-column:3/4;grid-row:1/3;width:64px;height:20px;margin:0;align-self:center}
+.a-spark svg{width:100%;height:100%;display:block}
+
+/* 5) 小屏：整宽带内网格降列，避免格子被压扁 */
+@media (max-width:1280px){
+  .sheet > .hcard,.sheet > .scard,.sheet > .xcard,.sheet > .hero{grid-column:span 4}
+  .sheet > .span4{grid-column:span 6}
+  .sheet > .span6{grid-column:span 12}
+  .dyn > #accVec{grid-column:span 6}
+  .dyn > .dcard{grid-column:span 3}
+  .adc-grid{grid-template-columns:repeat(3,minmax(0,1fr))}
+}
+@media (max-width:1080px){
+  .sheet > .hcard,.sheet > .scard,.sheet > .xcard,.sheet > .hero,
+  .sheet > .span4,.sheet > .span6{grid-column:span 6}
+  .dyn > #accVec{grid-column:span 12}
+  .dyn > .dcard{grid-column:span 6}
+  .adc-grid{grid-template-columns:repeat(2,minmax(0,1fr))}
+}
+@media (max-width:820px){
+  .sheet > .hcard,.sheet > .scard,.sheet > .xcard,.sheet > .hero,
+  .sheet > .span4,.sheet > .span6{grid-column:span 12}
+  .dyn > .dcard{grid-column:span 12}
+  .adc-grid{grid-template-columns:minmax(0,1fr)}
+}
+</style>
+</head>
+<body>
+<div id="app">
+
+  <!-- ======== 左侧导航（窄屏自动变底部横条） ======== -->
+  <nav id="rail" aria-label="主导航">
+    <div class="logo-sq">
+      <img src="assets/logo_crt.png" alt="CRT"
+           onerror="this.style.display='none';this.nextElementSibling.style.display=''">
+      <span class="txt" style="display:none">CRT</span>
+    </div>
+    <button class="rail-item active" type="button" aria-current="true"><span class="ic" aria-hidden="true">◱</span>总览</button>
+    <button class="rail-item" type="button" title="数据可视化工作台"><span class="ic" aria-hidden="true">▦</span>可视化</button>
+    <button class="rail-item" type="button"><span class="ic" aria-hidden="true">⌁</span>串口</button>
+  </nav>
+
+  <div id="main">
+    <!-- ======== 顶栏 ======== -->
+    <header id="topbar">
+      <div class="brand">
+        <img src="assets/logo_crt.png" alt=""
+             onerror="this.style.display='none';this.nextElementSibling.style.display=''">
+        <span class="fallback" style="display:none">CRT</span>
+        <div style="min-width:0">
+          <h1>无线数传遥测平台</h1>
+          <div class="sub">CSUST RACING · FORMULA STUDENT ELECTRIC</div>
+        </div>
+      </div>
+      <div class="tb-spacer"></div>
+      <span class="tag-preview">v2.7</span>
+      <span class="pill" id="livePill" role="status" aria-live="polite"><span class="dot rec-off" id="liveDot"></span><span id="liveText">未连接</span></span>
+      <span class="pill" id="rxPill">RX <b id="rxTag">0</b> f/s</span>
+      <span class="pill click" id="recPill" role="button" tabindex="0" title="点击切换录制状态"><span class="dot rec-off" id="recDot"></span><span id="recText">REC</span></span>
+      <span class="pill click" id="freezeBtn" role="button" tabindex="0" title="暂停 / 继续">⏸ <b id="freezeText">暂停</b></span>
+      <span id="clock">--:--:--</span>
+    </header>
+
+    <!-- ======== 主舞台 ======== -->
+    <main id="stage">
+
+      <!-- ============ P2 动力总成 ============ -->
+      <section class="zone" id="zoneP2">
+        <div class="zone-head">
+          <span class="ptag p2">P2</span>
+          <span class="z-title">动力总成 · POWERTRAIN</span>
+          <span class="z-meta">包类型 2 · MOTOR · 50 Hz · 23 B · 电机/母线</span>
+        </div>
+        <!-- ★ task-27：动力区改成**整宽带 + 优先级网格**（B「数据表」）。
+             格子大小 = 重要性；每格都带"数值 + 单位 + 阈值/峰值/近 30 s 热条"，
+             不再有 4+4 张同构卡 —— 这是解开"P2 被同行 P1 撑高、余量无处可去"那道
+             **结构性耦合**的关键（两个区不再共享同一栅格行）。
+             ★ 车速/转速改成 **canvas 环形表**（用户挑的方向 A），中心数值仍是 DOM
+               （#speedNum / #rpmNum 与单位同父，probe 与 config_matrix_audit 都按这个约定取）。 -->
+        <div class="sheet">
+          <!-- 车速：hero 格（3 列 × 2 行）= 环形表 + 速度条 + 34 段历史热条 -->
+          <div class="hcard span4">
+            <div class="cap"><span class="nm">车速 SPEED</span><span class="st" id="speedState">—</span>
+              <span class="lim" id="speedSub">0 – 40 m/s · int16 ×100</span></div>
+            <div class="ring">
+              <canvas id="speedGauge" class="ring-cv" aria-label="车速环形表"></canvas>
+              <div class="ring-val"><div class="v"><span id="speedNum">0.0</span><span class="u" id="speedUnit">m/s</span></div></div>
+            </div>
+            <div class="bar-track"><div class="bar-fill fill-speed" id="speedBar"></div>
+              <!-- 报警刻线：位置是**唯一来源**，环形表的红色刻度线直接读它的 left
+                   （app.js 的 tickValue()），不在 JS 里再写一份 34 m/s 之类的常量 -->
+              <div class="bar-tick" id="speedWarnTick" style="left:85%"></div></div>
+            <div class="heat" id="speedHeat" data-heat="speed" aria-hidden="true"></div>
+            <div class="cap foot"><span>0</span><span>近 30 s 历史热条 →</span><span id="speedFs">40</span></div>
+          </div>
+
+          <!-- 转速：环形表 + 换挡灯 + 分段条（限扭线在条上，量程文案由配置刷） -->
+          <div class="hcard span4">
+            <div class="cap"><span class="nm">电机转速 RPM</span><span class="st" id="rpmState">—</span>
+              <span class="lim">限扭 3.8k</span></div>
+            <div class="ring">
+              <canvas id="rpmGauge" class="ring-cv" aria-label="转速环形表"></canvas>
+              <div class="ring-val"><div class="v"><span id="rpmNum">0</span><span class="u" id="rpmUnit">RPM</span></div></div>
+            </div>
+            <div class="rev-row" id="revRow" aria-hidden="true"></div>
+            <div class="bar-track seg"><div class="bar-fill fill-ok" id="rpmBar"></div>
+              <div class="bar-tick" id="rpmLimitTick" style="left:38.2%"></div>
+              <div class="bar-tick" id="rpmWarnTick" style="left:80%"></div></div>
+            <div class="bar-scale" id="rpmScale"><span>0</span><span>3.8k 限扭</span><span>10k</span></div>
+          </div>
+
+          <!-- 电池功率：大数字 + 上限红线安全条 + 峰值保持（>80kW 红警语义完整保留） -->
+          <div class="scard span4" id="pwrCard">
+            <div class="cap"><span class="nm">电池功率</span><span class="st" id="pwrState">—</span>
+              <span class="lim">阈值报警 80 kW</span></div>
+            <div class="big-num"><span id="pwrNum">--</span><span class="u">kW</span></div>
+            <div class="bar-track big"><div class="bar-fill fill-pwr-ok" id="pwrBar"></div>
+              <div class="bar-tick pwr-limit-tick" id="pwrTick" style="left:66.67%"></div></div>
+            <div class="bar-scale pwr-scale"><span>0</span>
+              <span class="pwr-limit-lbl" id="pwrLimitLbl" style="left:66.67%">上限 80</span>
+              <span id="pwrFsLbl">120 kW</span></div>
+            <button type="button" class="pwr-peak" id="pwrPeak" title="峰值 0.0 kW · 点击清零">峰值
+              <b id="pwrPeakNum">—</b> kW</button>
+          </div>
+
+          <!-- 油门：窄格 + 分段条 + 热条 -->
+          <div class="hcard span2">
+            <div class="cap"><span class="nm">油门开度</span><span class="st" id="thrState">—</span></div>
+            <div class="big-num sm"><span id="thrNum">0</span><span class="u" id="thrUnit">%</span></div>
+            <div class="bar-track seg"><div class="bar-fill fill-thr" id="thrBar"></div></div>
+            <div class="bar-scale" id="thrScale"><span>0</span><span>50</span><span>100%</span></div>
+            <div class="heat" id="thrHeat" data-heat="throttle" aria-hidden="true"></div>
+          </div>
+
+          <!-- 扭矩：窄格 + 安全条 + 峰值刻线 + 热条 -->
+          <div class="hcard span2">
+            <div class="cap"><span class="nm">扭矩</span><span class="st" id="tqState">—</span></div>
+            <div class="big-num sm"><span id="tqNum">0.0</span><span class="u" id="tqUnit">N·m</span></div>
+            <div class="bar-track"><div class="bar-fill fill-tq" id="tqBar"></div>
+              <div class="bar-tick" id="tqPeakTick" style="display:none"></div></div>
+            <div class="bar-scale" id="tqScale"><span>0</span><span>75</span><span>150 上限</span></div>
+            <div class="heat" id="tqHeat" data-heat="torque" aria-hidden="true"></div>
+          </div>
+
+          <!-- 电机温度：分段温带 + 阈值刻线（区间语义，不是线性量） -->
+          <div class="scard span4">
+            <div class="cap"><span class="nm">电机温度</span><span class="st" id="tempState">正常</span>
+              <span class="lim">偏高 70 · 过热 90</span></div>
+            <div class="big-num sm"><span id="tempNum">--</span><span class="u" id="tempUnit">°C</span></div>
+            <div class="bar-track big">
+              <div class="temp-zones"><i class="z-ok"></i><i class="z-warn"></i><i class="z-danger"></i></div>
+              <div class="bar-fill fill-ok" id="tempBar"></div>
+              <div class="bar-tick" id="tempHotTick" style="left:75%"></div>
+            </div>
+            <div class="bar-scale" id="tempScale"><span>0</span><span>70</span><span>90</span><span>120</span></div>
+          </div>
+
+          <!-- 母线电压：安全区间横条 + 热条 -->
+          <div class="scard span2">
+            <div class="cap"><span class="nm">母线电压</span><span class="st" id="voltState">—</span>
+              <span class="lim">安全区 380–520 V</span></div>
+            <div class="big-num sm"><span id="voltNum">--</span><span class="u" id="voltUnit">V</span></div>
+            <div class="bar-track"><div class="bar-fill fill-volt" id="voltBar"></div>
+              <div class="bar-tick" id="voltLoTick" style="left:63.33%"></div></div>
+            <div class="bar-scale" id="voltScale"><span>0</span><span>300</span><span>600 V</span></div>
+            <div class="heat" id="voltHeat" data-heat="volt" aria-hidden="true"></div>
+          </div>
+
+          <!-- 母线电流：安全条 + 上限红线 + 峰值刻线 -->
+          <div class="scard span2">
+            <div class="cap"><span class="nm">母线电流</span><span class="st" id="ampState">—</span>
+              <span class="lim">上限 180 A</span></div>
+            <div class="big-num sm"><span id="ampNum">--</span><span class="u" id="ampUnit">A</span></div>
+            <div class="bar-track"><div class="bar-fill fill-amp" id="ampBar"></div>
+              <div class="bar-tick" id="ampLimitTick" style="left:90%"></div></div>
+            <div class="bar-scale" id="ampScale"><span>0</span><span>100</span><span>200 A</span></div>
+            <div class="heat" id="ampHeat" data-heat="amp" aria-hidden="true"></div>
+          </div>
+
+          <!-- 转速 × 车速（双轴，近 30 s）：由既有 state.buf 切片，纯前端 -->
+          <div class="xcard span6">
+            <div class="cap"><span class="nm">转速 × 车速（双轴）</span>
+              <span class="lim" id="dualCap">近 30 s · 蓝=转速 橙=车速</span></div>
+            <canvas id="dualCanvas" class="mini-cv" aria-label="转速车速双轴曲线"></canvas>
+          </div>
+
+          <!-- 功率 × 电流（相关性）：每一跑的电耗特征 -->
+          <div class="xcard span6">
+            <div class="cap"><span class="nm">功率 × 电流（相关性）</span>
+              <span class="lim">越靠右下越费电</span></div>
+            <canvas id="scatterCanvas" class="mini-cv" aria-label="功率电流相关图"></canvas>
+          </div>
+        </div>
+      </section>
+      <!-- ============ P1 姿态惯性 ============ -->
+      <section class="zone" id="zoneP1">
+        <div class="zone-head">
+          <span class="ptag p1">P1</span>
+          <span class="z-title">姿态与惯性 · DYNAMICS</span>
+          <span class="z-meta">包类型 1 · NAV · 25 Hz · 22 B · 姿态/加速度(横+纵)</span>
+        </div>
+        <!-- ============ P1 姿态惯性（整宽带） ============ -->
+        <div class="dyn">
+          <!-- ★ 加速度矢量图（用户指令：留在「总览 → 姿态与惯性」；全页只此一份）。
+               画布走 createLayer/syncLayer（与趋势/图表同一套 DPR 处理），
+               重绘走 accVecDirty 脏标记 + 离散调用，不给 rAF 主循环加每帧开销。 -->
+          <div class="accvec" id="accVec">
+            <canvas id="accVecCanvas" class="accvec-canvas" aria-label="加速度矢量图"></canvas>
+            <div class="accvec-side">
+              <div class="accvec-cap">
+                加速度矢量
+                <span class="accvec-chip" id="accVecChip">RAW</span>
+                <span class="accvec-u" id="accVecUnit"></span>
+              </div>
+              <div class="accvec-row">
+                <span class="accvec-dot" style="background:#9A4A06"></span>
+                <span class="accvec-k">横向 LAT</span>
+                <b id="accVecLat">—</b>
+              </div>
+              <div class="accvec-row">
+                <span class="accvec-dot" style="background:#1D4ED8"></span>
+                <span class="accvec-k">纵向 LON</span>
+                <b id="accVecLon">—</b>
+              </div>
+              <div class="accvec-row">
+                <span class="accvec-dot" style="background:#C8393B"></span>
+                <span class="accvec-k">合成 MAG</span>
+                <b id="accVecMag">—</b>
+              </div>
+              <div class="accvec-note" id="accVecNote">等待 NAV 数据…</div>
+            </div>
+          </div>
+
+          <!-- 横滚 -->
+          <div class="dcard">
+            <div class="d-top"><span class="d-name">横滚 ROLL</span><span class="raw-chip">×100</span></div>
+            <div class="d-num"><span id="rollNum">0.0</span><small id="rollUnit"> °</small></div>
+            <div class="d-widget">
+              <svg class="dial" viewBox="0 0 120 64" aria-hidden="true">
+                <path class="dial-track" d="M10 56 A50 50 0 0 1 110 56"/>
+                <line class="dial-zero" x1="60" y1="56" x2="60" y2="14"/>
+                <g id="rollNeedle" transform="rotate(0 60 56)">
+                  <line class="dial-needle" x1="60" y1="56" x2="60" y2="16"/>
+                </g>
+                <circle class="dial-hub" cx="60" cy="56" r="3.5"/>
+              </svg>
+            </div>
+          </div>
+          <!-- 俯仰 -->
+          <div class="dcard">
+            <div class="d-top"><span class="d-name">俯仰 PITCH</span><span class="raw-chip">×100</span></div>
+            <div class="d-num"><span id="pitchNum">0.0</span><small id="pitchUnit"> °</small></div>
+            <div class="d-widget ladder">
+              <div class="half up" id="pitchUp"></div>
+              <div class="half dn" id="pitchDn"></div>
+              <div class="mid"></div>
+            </div>
+          </div>
+          <!-- 航向 -->
+          <div class="dcard">
+            <div class="d-top"><span class="d-name">航向 YAW</span><span class="raw-chip">×100</span></div>
+            <div class="d-num"><span id="yawNum">0.0</span><small id="yawUnit"> °</small></div>
+            <div class="d-widget tape">
+              <span class="tk" style="left:0%"><em>0</em></span>
+              <span class="tk" style="left:25%"><em>90</em></span>
+              <span class="tk" style="left:50%"><em>180</em></span>
+              <span class="tk" style="left:75%"><em>270</em></span>
+              <span class="tk" style="left:99%"><em>360</em></span>
+              <span class="ptr" id="yawPtr" style="left:0%"></span>
+            </div>
+          </div>
+          <!-- 合成加速度（协议把单路 ACCEL 拆成横向+纵向，这里显示合成总加速度） -->
+          <div class="dcard">
+            <div class="d-top"><span class="d-name">合成加速度 ACCEL</span><span class="raw-chip" id="accChip">RAW</span></div>
+            <div class="d-num"><span id="accNum">0</span><small id="accUnit"> raw</small></div>
+            <div class="d-widget gbar">
+              <div class="neg" id="accNeg"></div>
+              <div class="pos" id="accPos"></div>
+              <div class="mid"></div>
+              <span class="sc" id="accScaleLo" style="left:4%">-16384</span>
+              <span class="sc" style="left:50%;transform:translateX(-50%)">0</span>
+              <span class="sc" id="accScaleHi" style="right:4%">+16384</span>
+            </div>
+          </div>
+        </div>
+      </section>
+      <!-- ============ P0 传感通道 ============ -->
+      <section class="zone" id="zoneP0">
+        <div class="zone-head">
+          <span class="ptag p0">P0</span>
+          <span class="z-title">传感通道 · SENSORS</span>
+          <span class="z-meta">包类型 0 · ADC · 100 Hz · 27 B · 10 通道 · 12-bit (0–4095) · 单位与位数随第 3 区配置</span>
+        </div>
+        <div class="adc-grid" id="adcGrid"></div>
+      </section>
+
+      <!-- ============ 趋势曲线 ============ -->
+      <section class="zone" id="zoneTrend">
+        <div class="zone-head">
+          <span class="z-title">趋势曲线 · TREND</span>
+          <span class="z-meta">近 30 s · 点击通道开关 · 点「量程」切三档：归一化 / 自适应 / 分组分带</span>
+          <button class="mode-btn on" id="normBtn" type="button" aria-pressed="true">归一化量程</button>
+        </div>
+        <div class="chip-bar" id="chipBar" role="group" aria-label="曲线通道开关"></div>
+        <div class="trend-wrap">
+          <div class="chart-box">
+            <canvas id="trendCanvas"></canvas>
+            <canvas id="cursorCanvas" aria-hidden="true"></canvas>
+            <div class="pause-tag" id="pauseTag" style="display:none">⏸ 已暂停</div>
+            <div class="sel-stats" id="selStats" style="display:none"></div>
+          </div>
+          <div class="sig-panel" id="sigPanel" aria-label="通道当前值面板"></div>
+        </div>
+      </section>
+
+      <!-- ============ 数据可视化工作台 ============ -->
+      <section class="zone" id="zoneVisual">
+        <div class="zone-head">
+          <span class="ptag vis">VIS</span>
+          <span class="z-title">数据可视化 · VISUALIZATION</span>
+          <span class="z-meta">拖拽左侧数据通道到图表进行分析</span>
+          <button class="mode-btn on" id="addChartBtn" type="button">+ 添加图表</button>
+        </div>
+        <div class="vis-wrap">
+          <div class="vis-channels" id="visChannels" aria-label="数据通道列表"></div>
+          <div class="vis-grid" id="visGrid"></div>
+        </div>
+      </section>
+
+      <!-- ============ 串口 ============ -->
+      <section class="zone" id="zoneSerial">
+        <div class="zone-head">
+          <span class="z-title">串口 · SERIAL</span>
+          <span class="z-meta" id="connMeta">未连接</span>
+        </div>
+        <div class="ctl-row">
+          <label for="portSelect">端口</label>
+          <select id="portSelect" class="sel"></select>
+          <label for="baudSelect">波特率</label>
+          <select id="baudSelect" class="sel">
+            <option>115200</option><option>921600</option><option>460800</option>
+            <option>230400</option><option>57600</option><option>9600</option>
+          </select>
+          <button class="btn primary" id="connectBtn" type="button">连接</button>
+          <button class="btn" id="refreshPortsBtn" type="button">刷新端口</button>
+          <span class="pill"><span class="dot rec-off" id="connDot"></span><span id="connText">未连接</span></span>
+        </div>
+        <div class="hexbox" id="hexBox" aria-label="原始 HEX 帧监视">
+          <div class="hex-idle" id="hexIdle">连接后在此显示原始 HEX 帧…</div>
+        </div>
+        <div class="ctl-row">
+          <label for="cmdInput">发送</label>
+          <input id="cmdInput" class="inp grow" placeholder="ASCII 文本，或 HEX 字节（如 55 AA 01）">
+          <select id="cmdMode" class="sel" aria-label="发送格式"><option>ASCII</option><option>HEX</option></select>
+          <button class="btn" id="sendBtn" type="button">发送</button>
+        </div>
+      </section>
+
+      <!-- ============ 记录 ============ -->
+      <section class="zone" id="zoneRecord">
+        <div class="zone-head">
+          <span class="z-title">记录 · RECORD</span>
+          <span class="z-meta" id="recMeta" role="status" aria-live="polite">未在记录</span>
+        </div>
+        <div class="ctl-row">
+          <label for="saveDirInput">保存目录</label>
+          <input id="saveDirInput" class="inp grow" readonly>
+          <button class="btn" id="browseDirBtn" type="button">浏览…</button>
+          <button class="btn" id="openDirBtn" type="button">打开目录</button>
+          <button class="btn primary" id="recBtn" type="button">开始记录</button>
+          <button class="btn" id="exportBtn" type="button">导出 CSV</button>
+          <button class="btn" id="replayBtn" type="button">数据回放</button>
+          <!-- ★ 回放进度条已按用户明确选择**移到页面底栏**（原来放在这里要滚动才看得到，
+               拉进度条时看不到数据变化）。控件现在在 #footer 的 .rp-group 里，
+               全页只有一处 #replayRange —— 这里刻意不留第二份。
+               记录区这一行因此回到加控件之前的原始几何。 -->
+        </div>
+        <div class="loglist" id="logList"><div class="hex-idle">尚无记录。选择保存目录并点击「开始记录」后，数据实时写入 CSV。</div></div>
+      </section>
+
+      <!-- ============ 设置 ============ -->
+      <section class="zone" id="zoneSettings">
+        <div class="zone-head">
+          <span class="z-title">设置 · SETTINGS</span>
+          <span class="z-meta">演示 / 录制 / 缓冲</span>
+        </div>
+        <div class="ctl-row">
+          <label class="chk"><input type="checkbox" id="demoMode"> 演示模式（无硬件时播放模拟数据）</label>
+          <label class="chk"><input type="checkbox" id="autoRecord" checked> 连接后自动开始录制</label>
+        </div>
+        <div class="ctl-row">
+          <label for="bufInput">趋势缓冲</label>
+          <input id="bufInput" class="inp num" value="600">
+          <span class="hint">点/通道 · 推送 20 Hz → 600 点 ≈ 30 秒</span>
+        </div>
+
+        <!-- 2026-10-06 移除：原来的「量程与单位 · RANGE & UNIT」在线编辑器
+             （量程/系数/单位表格 + 应用/保存/放弃/恢复按钮 + 生效来源状态条）
+             按用户要求整块删除。免打包改配置的入口现在只剩 exe 旁的
+             telemetry_user.json（改完重启生效），后端 load_user_cfg() 仍然读它。 -->
+      </section>
+
+    </main>
+
+    <!-- ======== 底部状态栏 ======== -->
+    <footer id="footer">
+      <span>FPS <b id="fpsTag">0</b></span>
+      <span class="sep">|</span>
+      <span>RX <b id="rxFoot">0</b> f/s</span>
+      <span class="sep">|</span>
+      <span class="foot-opt">帧率 <b>P0 100Hz</b> · <b>P1 25Hz</b> · <b>P2 50Hz</b></span>
+      <span class="sep foot-opt">|</span>
+      <span class="foot-opt">协议 <b>0xAA55 / 0x55AA · CRC-16/MODBUS</b></span>
+      <!-- ★ 回放控制组（问题一 + 问题四，用户明确选择底栏）：
+           进度条 + 位置标签放在固定可见的底栏里，拉滑块时主区数据一起看得到。
+           插在末尾 margin-left:auto 的版本文字**之前**，正好落在底栏的弹性空档里
+           （基线实测：协议文字右缘 x=670、版本文字左缘 x=1425，空档约 755px）。
+           ⚠️ 底栏 flex:0 0 30px 与页面栅格一律未动；本组 flex:0 0 auto，
+              绝不让既有文字被挤动；不加 transition / will-change（B08）。
+           ⏸/▶ 按钮是"**回放推进**的暂停/继续"，与顶栏 #freezeBtn（冻结缓冲供分析）
+           是两件事，文案也刻意不同。 -->
+      <span class="rp-group">
+        <button class="rp-btn" id="replayPauseBtn" type="button" disabled
+                aria-label="暂停回放" aria-pressed="false" title="暂停回放">⏸</button>
+        <input class="replay-range" id="replayRange" type="range" min="0" max="1000" step="1" value="0"
+               disabled aria-label="回放位置" title="拖动跳转到任意时刻">
+        <span class="hint" id="replayPos">— / —</span>
+      </span>
+      <span style="margin-left:auto">无线数传 v2.7 · CSUST Racing</span>
+    </footer>
+  </div>
+</div>
+
+<!-- 非阻塞提示层（替代 alert） -->
+<div id="toastWrap" role="status" aria-live="polite" aria-atomic="false"></div>
+
+</body>
+</html>

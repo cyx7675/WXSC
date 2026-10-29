@@ -1,0 +1,232 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>方向 A · 仪表台 CLUSTER —— 设计提案（未落地）</title>
+<!-- ==========================================================================
+     设计提案 · 方向 A「仪表台 CLUSTER」   —— **不是产品代码**，仅用于评审
+     语言：深色赛车仪表台；动力区由 3 个环形主仪表 + 状态列 + 趋势/相关图组成
+     数据：真机量级（车速 31.2 m/s / 5200 RPM / 443.9 V / 150.0 A / 66.6 kW / ±1 g）
+     技术：纯手写 HTML/CSS/JS + canvas，无外部字体/CDN；高频元素无 transition>50ms
+     ========================================================================== -->
+<link rel="stylesheet" href="dirA_cluster.css">
+</head>
+<body data-mode="normal">
+<div id="app">
+  <nav id="rail">
+    <div class="logo">CRT</div>
+    <button class="rail-item active"><span class="ic">◱</span>总览</button>
+    <button class="rail-item"><span class="ic">▦</span>可视化</button>
+    <button class="rail-item"><span class="ic">⌁</span>串口</button>
+  </nav>
+
+  <div id="main">
+    <header id="topbar">
+      <div class="brand">
+        <b>无线数传遥测</b><span class="sub">CSUST RACING · FS ELECTRIC</span>
+      </div>
+      <span class="prop">设计提案 · 未落地 · 方向 A「仪表台」</span>
+      <div class="spacer"></div>
+      <span class="pill live"><i class="dot"></i>LIVE · COM12</span>
+      <span class="pill">RX <b>168</b> f/s</span>
+      <span class="pill rec"><i class="dot"></i>REC 02:14</span>
+      <span class="pill"><b class="clock">12:44:31</b></span>
+    </header>
+
+    <main id="stage">
+
+      <!-- ================= 动力总成：仪表台主体 ================= -->
+      <section class="zone" id="zoneP2">
+        <div class="zone-head">
+          <span class="tag">P2</span><h2>动力总成 · POWERTRAIN</h2>
+          <span class="meta">MOTOR · 50 Hz · 23 B</span>
+        </div>
+
+        <div class="cluster">
+          <!-- 三个环形主仪表：粗读层（余光一扫就知道"多快 / 多转 / 多大功率"） -->
+          <div class="gauge big">
+            <canvas data-w="ring" data-sig="speed" data-sweep="250" data-rw="13" data-vsize="46" data-ticks="10"></canvas>
+            <div class="gauge-foot"><span>0</span><span>20</span><span>40 m/s</span></div>
+          </div>
+          <div class="gauge big">
+            <canvas data-w="ring" data-sig="rpm" data-sweep="250" data-rw="13" data-vsize="46" data-ticks="10"
+                    data-warnat="8000" data-lim="3800"></canvas>
+            <div class="gauge-foot"><span>0</span><span>5k 限扭</span><span>10k</span></div>
+          </div>
+          <div class="gauge big">
+            <canvas data-w="ring" data-sig="power" data-sweep="250" data-rw="13" data-vsize="46" data-ticks="6"
+                    data-warnat="80"></canvas>
+            <div class="gauge-foot"><span>0</span><span class="lim">80 上限</span><span>120 kW</span></div>
+          </div>
+
+          <!-- 状态列：精读 + 告警层（换挡灯 / 磁贴 / 温带 / 安全条） -->
+          <div class="statuscol">
+            <div class="lights" data-w="lights" data-sig="rpm" data-n="14"></div>
+            <div class="row3">
+              <div class="tile" data-w="tile" data-sig="throttle">
+                <span class="k">油门</span><span class="v"><b data-v>—</b><i>%</i></span>
+              </div>
+              <div class="tile" data-w="tile" data-sig="torque">
+                <span class="k">扭矩</span><span class="v"><b data-v>—</b><i>N·m</i></span>
+              </div>
+              <div class="tile" data-w="tile" data-sig="temp">
+                <span class="k">电机温度 <em data-state="temp">—</em></span>
+                <span class="v"><b data-v>—</b><i>°C</i></span>
+              </div>
+            </div>
+            <canvas class="band" data-w="band" data-sig="temp" data-zones="70,90"></canvas>
+            <div class="bars">
+              <div class="bar-row"><span class="bk">母线电压</span>
+                <canvas data-w="safety" data-sig="volt" data-fs="600"></canvas>
+                <span class="bv"><b data-txt="volt">—</b> V</span></div>
+              <div class="bar-row"><span class="bk">母线电流</span>
+                <canvas data-w="safety" data-sig="amp" data-fs="200" data-limit="180" data-peak="1"></canvas>
+                <span class="bv"><b data-txt="amp">—</b> A</span></div>
+            </div>
+          </div>
+        </div>
+
+        <!-- 趋势 / 相关层：这一层在产品里必须去趋势区切通道才看得到 -->
+        <div class="cluster-foot">
+          <div class="cf-card">
+            <div class="cf-head">近 30 s · 转速 × 车速</div>
+            <canvas data-w="spark" data-sig="rpm" data-sig2="speed"></canvas>
+          </div>
+          <div class="cf-card">
+            <div class="cf-head">功率 × 电流（相关性）</div>
+            <canvas data-w="scatter" data-x="amp" data-y="power" data-xlabel="电流 →" data-ylabel="↑ 功率"></canvas>
+          </div>
+          <div class="cf-card">
+            <div class="cf-head">油门 / 扭矩 双轴</div>
+            <canvas data-w="spark" data-sig="throttle" data-sig2="torque"></canvas>
+          </div>
+        </div>
+      </section>
+
+      <!-- ================= 姿态与惯性 ================= -->
+      <section class="zone" id="zoneP1">
+        <div class="zone-head"><span class="tag p1">P1</span><h2>姿态与惯性 · DYNAMICS</h2>
+          <span class="meta">NAV · 25 Hz · 22 B</span></div>
+        <div class="dyn">
+          <div class="dyn-card">
+            <div class="k">横滚 ROLL <em data-state="roll">—</em></div>
+            <canvas data-w="ring" data-sig="roll" data-sweep="120" data-rw="9" data-vsize="30" data-ticks="4" data-label="0"></canvas>
+          </div>
+          <div class="dyn-card">
+            <div class="k">俯仰 PITCH <em data-state="pitch">—</em></div>
+            <canvas data-w="ring" data-sig="pitch" data-sweep="120" data-rw="9" data-vsize="30" data-ticks="4" data-label="0"></canvas>
+          </div>
+          <div class="dyn-card">
+            <div class="k">航向 YAW</div>
+            <canvas data-w="ring" data-sig="yaw" data-sweep="360" data-rw="9" data-vsize="30" data-ticks="8" data-needle="1"></canvas>
+          </div>
+          <div class="dyn-card acc">
+            <div class="k">加速度矢量 <em data-state="accMag">—</em></div>
+            <canvas class="accvec" id="accVecCanvas"></canvas>
+            <div class="acc-legend"><span>横向 <b data-txt="accLat">—</b> g</span>
+              <span>纵向 <b data-txt="accLon">—</b> g</span>
+              <span class="mag">合成 <b data-txt="accMag">—</b> g</span></div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ================= 传感通道 ================= -->
+      <section class="zone" id="zoneP0">
+        <div class="zone-head"><span class="tag p0">P0</span><h2>传感通道 · SENSORS</h2>
+          <span class="meta">ADC · 100 Hz · 10 通道 · 12-bit</span></div>
+        <div class="adc" id="adcGrid"></div>
+      </section>
+
+      <!-- ================= 趋势 ================= -->
+      <section class="zone" id="zoneTrend">
+        <div class="zone-head"><span class="tag trd">TRD</span><h2>趋势曲线 · TREND</h2>
+          <span class="meta">近 30 s · 归一化量程</span></div>
+        <div class="trend-wrap">
+          <div class="trend-box"><canvas data-w="trend" data-sigs="rpm,speed,power,torque"></canvas></div>
+          <div class="readout">
+            <div class="ro-cap">当前值</div>
+            <div class="ro-row"><i style="background:var(--c-1)"></i><span>电机转速</span><b data-txt="rpm">—</b><u>RPM</u></div>
+            <div class="ro-row"><i style="background:var(--c-warn)"></i><span>车速</span><b data-txt="speed">—</b><u>m/s</u></div>
+            <div class="ro-row"><i style="background:var(--c-3)"></i><span>电池功率</span><b data-txt="power">—</b><u>kW</u></div>
+            <div class="ro-row"><i style="background:var(--c-4)"></i><span>扭矩</span><b data-txt="torque">—</b><u>N·m</u></div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ================= 串口 / 记录 / 设置 ================= -->
+      <section class="zone half" id="zoneSerial">
+        <div class="zone-head"><span class="tag io">I/O</span><h2>串口 · SERIAL</h2></div>
+        <div class="ctl"><label>端口</label><select><option>COM12</option></select>
+          <label>波特率</label><select><option>921600</option></select>
+          <button class="btn primary">连接</button><button class="btn">刷新</button></div>
+        <pre class="hex">AA 55 01 0E 00 3B 00 00 1C 02 4E 0A C7 05 8C 3C
+AA 55 02 01 4F 06 1B 00 8A 02 00 00 00 00 00 41
+AA 55 00 0F 27 01 0A 07 EE 0F 3F 0B D4 08 7E 06</pre>
+      </section>
+      <section class="zone half" id="zoneRecord">
+        <div class="zone-head"><span class="tag rec">REC</span><h2>记录 · RECORD</h2></div>
+        <div class="ctl"><label>保存目录</label><input value="F:\telemetry_v2\telemetry"><button class="btn">浏览…</button>
+          <button class="btn primary">开始记录</button><button class="btn">导出 CSV</button></div>
+        <div class="loglist"><div class="log-item"><div><div class="nm">耐久一_20261015_164330.csv</div>
+          <div class="mt">64564 帧 · 277 s · 4.2 MB</div></div><button class="btn">打开</button></div></div>
+      </section>
+      <section class="zone" id="zoneSettings">
+        <div class="zone-head"><span class="tag cfg">CFG</span><h2>设置 · SETTINGS</h2></div>
+        <div class="ctl"><label class="chk"><input type="checkbox" checked> 连接后自动开始录制</label>
+          <label>趋势缓冲</label><input class="num" value="600"><span class="hint">600 点 ≈ 30 秒</span></div>
+      </section>
+    </main>
+
+    <footer id="footer">
+      <span>FPS <b>30</b></span><span class="sep">|</span><span>RX <b>168</b> f/s</span>
+      <span class="sep">|</span><span>帧率 P0 100 · P1 25 · P2 50</span>
+      <span class="rp"><button class="rp-btn">⏸</button><input type="range" value="340"><span class="pos">12.3s / 45.6s</span></span>
+      <span class="ver">设计提案 · 方向 A</span>
+    </footer>
+  </div>
+</div>
+
+<script src="proto.js"></script>
+<script>
+/* ADC 卡片 + 加速度矢量图（原型：两块都用 canvas，与产品同技术路线） */
+(function () {
+  var grid = document.getElementById('adcGrid');
+  var html = '';
+  PROTO.ADC.forEach(function (a, i) {
+    html += '<div class="acard"><div class="at"><span class="ch">' + a.ch + '</span><span class="nm">' + a.name + '</span></div>' +
+      '<div class="av"><b>' + a.v.toFixed(1) + '</b><i>' + a.unit + '</i></div>' +
+      '<canvas class="aspark" data-w="spark" data-sig="speed"></canvas></div>';
+  });
+  grid.innerHTML = html;
+
+  var cv = document.getElementById('accVecCanvas');
+  function drawAcc() {
+    var dpr = Math.min(2, window.devicePixelRatio || 1);
+    var w = cv.clientWidth, h = cv.clientHeight;
+    cv.width = Math.round(w * dpr); cv.height = Math.round(h * dpr);
+    var ctx = cv.getContext('2d'); ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    ctx.clearRect(0, 0, w, h);
+    var cx = w / 2, cy = h / 2, R = Math.min(w, h) / 2 - 10, FS = 1.5;
+    for (var i = 1; i <= 3; i++) {
+      ctx.strokeStyle = i === 3 ? 'rgba(150,175,205,.35)' : 'rgba(150,175,205,.16)';
+      ctx.lineWidth = 1; ctx.beginPath(); ctx.arc(cx, cy, R * i / 3, 0, Math.PI * 2); ctx.stroke();
+    }
+    ctx.strokeStyle = 'rgba(150,175,205,.28)';
+    ctx.beginPath(); ctx.moveTo(cx - R, cy); ctx.lineTo(cx + R, cy);
+    ctx.moveTo(cx, cy - R); ctx.lineTo(cx, cy + R); ctx.stroke();
+    var lat = PROTO.V.accLat, lon = PROTO.V.accLon;
+    var px = cx + lat / FS * R, py = cy - lon / FS * R;
+    ctx.strokeStyle = '#FF5A5F'; ctx.lineWidth = 2;
+    ctx.beginPath(); ctx.moveTo(cx, cy); ctx.lineTo(px, py); ctx.stroke();
+    ctx.fillStyle = '#FF5A5F'; ctx.beginPath(); ctx.arc(px, py, 3.4, 0, Math.PI * 2); ctx.fill();
+    ctx.font = '600 10px Consolas,monospace'; ctx.fillStyle = 'rgba(150,175,205,.75)';
+    ctx.textAlign = 'left'; ctx.fillText('LAT+', cx + R - 30, cy + 12);
+    ctx.textAlign = 'center'; ctx.textBaseline = 'top'; ctx.fillText('LON+', cx, cy - R + 2);
+  }
+  window.addEventListener('load', drawAcc);
+  window.addEventListener('resize', drawAcc);
+  window._redrawAcc = drawAcc;
+})();
+</script>
+</body>
+</html>

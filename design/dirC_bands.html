@@ -1,0 +1,337 @@
+﻿<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>方向 C · 分层叙事带 BANDS —— 设计提案（未落地）</title>
+<!-- ==========================================================================
+     设计提案 · 方向 C「分层叙事带 BANDS」   —— **不是产品代码**
+     主张：**按"车在干什么"重新组织信息架构**，而不是按"包类型 P0/P1/P2"。
+     每个横带回答一个问题：① 车在干什么 ② 电从哪来 ③ 车稳不稳 ④ 热与健康
+                          ⑤ 分析 ⑥ 排故
+     于是"动力区高度被姿态区决定"这个耦合**在结构上就不存在了**：
+     动力与姿态不再共享同一栅格行，而是各自成为一条整宽的带。
+     ★ 这是三个方向里**改动最大**的方案（信息架构变了），操作习惯变化也最大。
+     ========================================================================== -->
+<link rel="stylesheet" href="dirC_bands.css">
+</head>
+<body data-mode="normal">
+<div id="app">
+  <nav id="rail">
+    <div class="logo">CRT</div>
+    <div class="band-index">
+      <span class="bi on">1</span><span class="bi">2</span><span class="bi">3</span>
+      <span class="bi">4</span><span class="bi">5</span><span class="bi">6</span>
+    </div>
+    <div class="rail-foot">
+      <button class="rail-item"><span class="ic">▦</span>可视化</button>
+      <button class="rail-item"><span class="ic">⌁</span>排故</button>
+    </div>
+  </nav>
+
+  <div id="main">
+    <header id="topbar">
+      <div class="brand"><b>无线数传遥测</b><span class="sub">CSUST RACING · FS ELECTRIC</span></div>
+      <span class="prop">设计提案 · 未落地 · 方向 C「叙事带」</span>
+      <div class="spacer"></div>
+      <span class="pill"><i class="dot"></i>LIVE · COM12</span>
+      <span class="pill">RX <b>168</b> f/s</span>
+      <span class="pill rec"><i class="dot"></i>REC</span>
+      <span class="pill"><b class="clock">12:44:31</b></span>
+    </header>
+
+    <main id="stage">
+
+      <!-- ============ ① 车在干什么 · DRIVE ============ -->
+      <section class="band" id="zoneP2">
+        <div class="band-head">
+          <span class="idx">1</span>
+          <div class="q"><h2>车在干什么 <em>DRIVE</em></h2>
+            <p>速度、转速、油门、扭矩 —— 这一带只回答"车现在跑得多猛"</p></div>
+          <div class="verdict">
+            <span class="vl"><b data-txt="speed">—</b> m/s</span>
+            <span class="vl"><b data-txt="rpm">—</b> RPM</span>
+            <span class="vl">油门 <b data-txt="throttle">—</b>%</span>
+            <span class="vl">扭矩 <b data-txt="torque">—</b> N·m</span>
+          </div>
+        </div>
+        <div class="drive">
+          <div class="dcell span4">
+            <div class="cap"><span class="nm">车速 SPEED</span><span class="st" data-state="speed">—</span>
+              <span class="lim">量程 0–40 m/s</span></div>
+            <div class="big"><b data-txt="speed">—</b><i>m/s</i></div>
+            <canvas class="sbar" data-w="safety" data-sig="speed" data-fs="40" data-peak="1"></canvas>
+            <div class="heat" data-w="heat" data-sig="speed" data-n="40"></div>
+          </div>
+          <div class="dcell span3">
+            <div class="cap"><span class="nm">电机转速</span><span class="st" data-state="rpm">—</span>
+              <span class="lim">限扭 3.8k</span></div>
+            <canvas class="half" data-w="ring" data-sig="rpm" data-sweep="200" data-rw="11" data-vsize="32"
+                    data-ticks="8" data-lim="3800" data-warnat="8000" data-label="0"></canvas>
+            <div class="lights" data-w="lights" data-sig="rpm" data-n="12"></div>
+          </div>
+          <div class="dcell span2">
+            <div class="cap"><span class="nm">油门</span><span class="st" data-state="throttle">—</span></div>
+            <div class="big sm"><b data-txt="throttle">—</b><i>%</i></div>
+            <canvas class="vbar" data-w="vbar" data-sig="throttle" data-fs="100"></canvas>
+          </div>
+          <div class="dcell span3">
+            <div class="cap"><span class="nm">扭矩</span><span class="st" data-state="torque">—</span>
+              <span class="lim">上限 150</span></div>
+            <div class="big sm"><b data-txt="torque">—</b><i>N·m</i></div>
+            <canvas class="spark" data-w="spark" data-sig="torque" data-peak="1"></canvas>
+          </div>
+        </div>
+      </section>
+
+      <!-- ============ ② 电从哪来 · ELECTRICAL ============ -->
+      <section class="band" id="bandElec">
+        <div class="band-head">
+          <span class="idx">2</span>
+          <div class="q"><h2>电从哪来 <em>ELECTRICAL</em></h2>
+            <p>母线电压 / 电流 / 电池功率，含 80 kW 红线与峰值</p></div>
+          <div class="verdict">
+            <span class="vl warn"><b data-txt="power">—</b> kW</span>
+            <span class="vl"><b data-txt="volt">—</b> V</span>
+            <span class="vl"><b data-txt="amp">—</b> A</span>
+          </div>
+        </div>
+        <div class="elec">
+          <div class="ecell">
+            <div class="cap"><span class="nm">电池功率</span><span class="st" data-state="power">—</span></div>
+            <div class="big"><b data-txt="power">—</b><i>kW</i><span class="peak">峰值 <b data-txt="power-mx">—</b></span></div>
+            <canvas class="sbar big" data-w="safety" data-sig="power" data-fs="120" data-limit="80" data-peak="1"></canvas>
+            <div class="foot"><span>0</span><span class="red">上限 80</span><span>120 kW</span></div>
+          </div>
+          <div class="ecell">
+            <div class="cap"><span class="nm">母线电压</span><span class="st" data-state="volt">—</span>
+              <span class="lim">安全区 380–520 V</span></div>
+            <div class="big sm"><b data-txt="volt">—</b><i>V</i></div>
+            <canvas class="sbar" data-w="safety" data-sig="volt" data-fs="600"></canvas>
+            <canvas class="spark" data-w="spark" data-sig="volt"></canvas>
+          </div>
+          <div class="ecell">
+            <div class="cap"><span class="nm">母线电流</span><span class="st" data-state="amp">—</span>
+              <span class="lim">上限 180 A</span></div>
+            <div class="big sm"><b data-txt="amp">—</b><i>A</i></div>
+            <canvas class="sbar" data-w="safety" data-sig="amp" data-fs="200" data-limit="180" data-peak="1"></canvas>
+            <canvas class="spark" data-w="spark" data-sig="amp"></canvas>
+          </div>
+          <div class="ecell">
+            <div class="cap"><span class="nm">功率 × 电流</span><span class="hint">越靠右下越费电</span></div>
+            <canvas class="scatter" data-w="scatter" data-x="amp" data-y="power"
+                    data-xlabel="电流 →" data-ylabel="↑ 功率"></canvas>
+          </div>
+        </div>
+      </section>
+
+      <!-- ============ ③ 车稳不稳 · CHASSIS（原 P1 + 悬架 ADC 合并） ============ -->
+      <section class="band" id="zoneP1">
+        <div class="band-head">
+          <span class="idx">3</span>
+          <div class="q"><h2>车稳不稳 <em>CHASSIS</em></h2>
+            <p>姿态（NAV）+ 四路悬架位移（ADC）合并 —— 它们回答的是同一个问题</p></div>
+          <div class="verdict">
+            <span class="vl">横滚 <b data-txt="roll">—</b>°</span>
+            <span class="vl">俯仰 <b data-txt="pitch">—</b>°</span>
+            <span class="vl">合成 <b data-txt="accMag">—</b> g</span>
+          </div>
+        </div>
+        <div class="chassis">
+          <div class="ccell span2"><div class="cap"><span class="nm">横滚 ROLL</span><span class="st" data-state="roll">—</span></div>
+            <div class="big sm"><b data-txt="roll">—</b><i>°</i></div>
+            <canvas class="sbar" data-w="safety" data-sig="roll" data-fs="30" data-peak="1"></canvas></div>
+          <div class="ccell span2"><div class="cap"><span class="nm">俯仰 PITCH</span><span class="st" data-state="pitch">—</span></div>
+            <div class="big sm"><b data-txt="pitch">—</b><i>°</i></div>
+            <canvas class="sbar" data-w="safety" data-sig="pitch" data-fs="20" data-peak="1"></canvas></div>
+          <div class="ccell span2"><div class="cap"><span class="nm">航向 YAW</span></div>
+            <div class="big sm"><b data-txt="yaw">—</b><i>°</i></div>
+            <canvas class="sbar" data-w="safety" data-sig="yaw" data-fs="360"></canvas></div>
+          <div class="ccell span3 acc"><div class="cap"><span class="nm">加速度矢量</span><span class="st" data-state="accMag">—</span></div>
+            <canvas id="accVecCanvas"></canvas>
+            <div class="foot"><span>横 <b data-txt="accLat">—</b> g</span><span>纵 <b data-txt="accLon">—</b> g</span>
+              <span>合成 <b data-txt="accMag">—</b> g</span></div></div>
+          <div class="ccell span3 sus"><div class="cap"><span class="nm">四路悬架位移</span><span class="hint">mm · 近 30 s</span></div>
+            <div id="susRows"></div></div>
+        </div>
+      </section>
+
+      <!-- ============ ④ 热与健康 · HEALTH ============ -->
+      <section class="band" id="bandHealth">
+        <div class="band-head">
+          <span class="idx">4</span>
+          <div class="q"><h2>热与健康 <em>HEALTH</em></h2>
+            <p>温度带 + 状态灯阵 + 告警清单；正常时这一带"不需要看"，异常时自己跳出来</p></div>
+          <div class="verdict">
+            <span class="vl"><b data-txt="temp">—</b> °C</span>
+            <span class="vl ok" id="healthWord">全部正常</span>
+          </div>
+        </div>
+        <div class="health">
+          <div class="hcell hero">
+            <div class="cap"><span class="nm">电机温度</span><span class="st" data-state="temp">—</span>
+              <span class="lim">偏高 70 · 过热 90 · 上限 120</span></div>
+            <div class="big"><b data-txt="temp">—</b><i>°C</i></div>
+            <canvas class="tband" data-w="band" data-sig="temp" data-zones="70,90"></canvas>
+            <div class="foot"><span>0</span><span>70</span><span>90</span><span>120</span></div>
+          </div>
+          <div class="hcell">
+            <div class="cap"><span class="nm">状态灯阵</span><span class="hint">绿=正常 琥珀=偏高 红=超限</span></div>
+            <div class="lamps" id="lampGrid"></div>
+          </div>
+          <div class="hcell">
+            <div class="cap"><span class="nm">告警清单</span></div>
+            <ul class="alist" id="alarmList"></ul>
+          </div>
+        </div>
+      </section>
+
+      <!-- ============ ⑤ 分析 · ANALYSIS ============ -->
+      <section class="band" id="zoneTrend">
+        <div class="band-head">
+          <span class="idx">5</span>
+          <div class="q"><h2>分析 <em>ANALYSIS</em></h2>
+            <p>趋势曲线 + 通道开关 + 框选统计；回放进度也在这一带（分析时才需要）</p></div>
+          <div class="verdict"><span class="vl">近 30 s</span>
+            <span class="rp"><button class="rp-btn">⏸</button><input type="range" value="340">
+              <span class="pos">12.3s / 45.6s</span></span></div>
+        </div>
+        <div class="analysis">
+          <div class="achips" id="chipBar"></div>
+          <div class="trend-wrap">
+            <div class="trend-box"><canvas data-w="trend" data-sigs="rpm,speed,power,torque,temp"></canvas></div>
+            <div class="readout">
+              <div class="ro-cap"><b>数值</b><span>实时</span></div>
+              <div class="ro-row"><i style="background:var(--c-1)"></i><span>电机转速</span><b data-txt="rpm">—</b><u>RPM</u></div>
+              <div class="ro-row"><i style="background:var(--c-warn)"></i><span>车速</span><b data-txt="speed">—</b><u>m/s</u></div>
+              <div class="ro-row"><i style="background:var(--c-3)"></i><span>电池功率</span><b data-txt="power">—</b><u>kW</u></div>
+              <div class="ro-row"><i style="background:var(--c-4)"></i><span>扭矩</span><b data-txt="torque">—</b><u>N·m</u></div>
+              <div class="ro-row"><i style="background:var(--c-over)"></i><span>电机温度</span><b data-txt="temp">—</b><u>°C</u></div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ============ ⑥ 排故 · SERVICE ============ -->
+      <section class="band" id="bandService">
+        <div class="band-head">
+          <span class="idx">6</span>
+          <div class="q"><h2>排故 <em>SERVICE</em></h2>
+            <p>串口原始帧 / 连接控制 / 录制落盘 / 设置 —— 只有在现场排查时才看这一带</p></div>
+          <div class="verdict"><span class="vl">COM12 · 921600</span></div>
+        </div>
+        <div class="service">
+          <div class="scell">
+            <div class="cap"><span class="nm">连接</span></div>
+            <div class="ctl"><label>端口</label><select><option>COM12</option></select>
+              <label>波特率</label><select><option>921600</option></select>
+              <button class="btn primary">连接</button><button class="btn">刷新</button></div>
+            <div class="cap" style="margin-top:10px"><span class="nm">原始 HEX</span>
+              <span class="hint">AA 55 · CRC-16/MODBUS</span></div>
+            <pre class="hex">AA 55 01 0E 00 3B 00 00 1C 02 4E 0A C7 05 8C 3C
+AA 55 02 01 4F 06 1B 00 8A 02 00 00 00 00 00 41
+AA 55 00 0F 27 01 0A 07 EE 0F 3F 0B D4 08 7E 06</pre>
+          </div>
+          <div class="scell">
+            <div class="cap"><span class="nm">记录与导出</span></div>
+            <div class="ctl"><label>保存目录</label><input value="F:\telemetry_v2\telemetry">
+              <button class="btn primary">开始记录</button><button class="btn">导出 CSV</button></div>
+            <div class="loglist">
+              <div class="log-item"><div><div class="nm">耐久一_20261015_164330.csv</div>
+                <div class="mt">64564 帧 · 277 s · 4.2 MB</div></div><button class="btn">打开</button></div>
+              <div class="log-item"><div><div class="nm">telemetry_20261015_163022.csv</div>
+                <div class="mt">48907 帧 · 238 s · 3.1 MB</div></div><button class="btn">打开</button></div>
+            </div>
+            <div class="ctl" style="margin-top:10px">
+              <label class="chk"><input type="checkbox" checked> 连接后自动开始录制</label>
+              <label>趋势缓冲</label><input class="num" value="600"><span class="hint">600 点 ≈ 30 秒</span></div>
+          </div>
+          <div class="scell">
+            <div class="cap"><span class="nm">全部 10 路传感通道</span><span class="hint">12-bit (0–4095)</span></div>
+            <div class="adc" id="adcGrid"></div>
+          </div>
+        </div>
+      </section>
+    </main>
+
+    <footer id="footer">
+      <span>FPS <b>30</b></span><span class="sep">|</span><span>RX <b>168</b> f/s</span>
+      <span class="sep">|</span><span>协议 0xAA55 / 0x55AA · CRC-16/MODBUS</span>
+      <span class="ver">设计提案 · 方向 C</span>
+    </footer>
+  </div>
+</div>
+
+<script src="proto.js"></script>
+<script>
+(function () {
+  // 悬架 4 路（原 ADC 的 CH01–CH04，合并进"车稳不稳"这一带）
+  var rows = '', names = ['右前', '左后', '右后', '左前'];
+  PROTO.ADC.slice(0, 4).forEach(function (a, i) {
+    rows += '<div class="srow"><span class="k">' + names[i] + '</span>' +
+      '<span class="v">' + a.v.toFixed(0) + '<i>mm</i></span>' +
+      '<span class="hh" data-w="heat" data-sig="adc' + i + '" data-n="14" data-color="var(--c-1)"></span></div>';
+  });
+  document.getElementById('susRows').innerHTML = rows;
+
+  // 其余通道（CH05–CH10）放排故带里，保持"完整可用"但降级到次级位置
+  var grid = '', html = '';
+  PROTO.ADC.slice(4).forEach(function (a, i) {
+    html += '<div class="arow"><span class="ch">' + a.ch + '</span><span class="nm">' + a.name + '</span>' +
+      '<span class="av"><b>' + a.v.toFixed(1) + '</b><i>' + a.unit + '</i></span>' +
+      '<span class="aheat" data-w="heat" data-sig="adc' + (i + 4) + '" data-n="12" data-color="var(--c-1)"></span></div>';
+  });
+  document.getElementById('adcGrid').innerHTML = html;
+
+  // 状态灯阵 + 告警清单（随 normal / alarm 变化）
+  function lamps() {
+    var items = [['电机温度', 'temp'], ['电池功率', 'power'], ['母线电流', 'amp'],
+      ['母线电压', 'volt'], ['电机转速', 'rpm'], ['车速', 'speed'],
+      ['扭矩', 'torque'], ['油门', 'throttle'], ['合成加速度', 'accMag'], ['横滚', 'roll']];
+    var h = '', alarms = [], nOver = 0;
+    items.forEach(function (it) {
+      var st = PROTO.stateOf(it[1]);
+      if (st === 'over') { nOver++; alarms.push(it[0] + ' 超限 · ' + PROTO.fmt(it[1]) + ' ' + (PROTO.SIG[it[1]].unit || '')); }
+      else if (st === 'warn') alarms.push(it[0] + ' 偏高 · ' + PROTO.fmt(it[1]) + ' ' + (PROTO.SIG[it[1]].unit || ''));
+      h += '<span class="lp ' + st + '" title="' + it[0] + '"></span>';
+    });
+    document.getElementById('lampGrid').innerHTML = h;
+    document.getElementById('alarmList').innerHTML = alarms.length
+      ? alarms.map(function (a) { return '<li class="' + (nOver ? 'over' : '') + '">' + a + '</li>'; }).join('')
+      : '<li class="ok">没有需要处理的项</li>';
+    var w = document.getElementById('healthWord');
+    w.textContent = nOver ? (nOver + ' 项超限') : (alarms.length ? alarms.length + ' 项偏高' : '全部正常');
+    w.className = 'vl ' + (nOver ? 'bad' : alarms.length ? 'warn' : 'ok');
+  }
+  window.addEventListener('load', lamps);
+  window.addEventListener('resize', lamps);
+  window._redrawExtra = lamps;
+
+  // 加速度矢量
+  var cv = document.getElementById('accVecCanvas');
+  function drawAcc() {
+    var dpr = Math.min(2, window.devicePixelRatio || 1), w = cv.clientWidth, h = cv.clientHeight;
+    cv.width = Math.round(w * dpr); cv.height = Math.round(h * dpr);
+    var ctx = cv.getContext('2d'); ctx.setTransform(dpr, 0, 0, dpr, 0, 0); ctx.clearRect(0, 0, w, h);
+    var cx = w / 2, cy = h / 2, R = Math.min(w, h) / 2 - 8, FS = 1.5;
+    for (var i = 1; i <= 3; i++) {
+      ctx.strokeStyle = i === 3 ? 'rgba(26,32,44,.22)' : 'rgba(26,32,44,.10)';
+      ctx.beginPath(); ctx.arc(cx, cy, R * i / 3, 0, Math.PI * 2); ctx.stroke();
+    }
+    ctx.strokeStyle = 'rgba(26,32,44,.14)';
+    ctx.beginPath(); ctx.moveTo(cx - R, cy); ctx.lineTo(cx + R, cy);
+    ctx.moveTo(cx, cy - R); ctx.lineTo(cx, cy + R); ctx.stroke();
+    var px = cx + PROTO.V.accLat / FS * R, py = cy - PROTO.V.accLon / FS * R;
+    ctx.strokeStyle = '#C0392B'; ctx.lineWidth = 2.2;
+    ctx.beginPath(); ctx.moveTo(cx, cy); ctx.lineTo(px, py); ctx.stroke();
+    ctx.fillStyle = '#C0392B'; ctx.beginPath(); ctx.arc(px, py, 3.4, 0, Math.PI * 2); ctx.fill();
+  }
+  window.addEventListener('load', drawAcc); window.addEventListener('resize', drawAcc);
+
+  var chips = ['车速', '电机转速', '油门开度', '扭矩', '母线电压', '母线电流', '电池功率', '电机温度', '悬架位移1'];
+  document.getElementById('chipBar').innerHTML = chips.map(function (c, i) {
+    return '<span class="chip' + (i < 5 ? ' on' : '') + '"><i style="background:var(--c-' + (i % 4 + 1) + ')"></i>' + c + '</span>';
+  }).join('');
+})();
+</script>
+</body>
+</html>

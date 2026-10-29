@@ -1,0 +1,14 @@
+# ============================================================
+# Git 行尾规范
+# 文本文件统一 LF；批处理必须 CRLF（cmd 按 GBK+CRLF 解析，LF 会出问题）
+# ============================================================
+* text=auto eol=lf
+
+*.bat text eol=crlf
+*.cmd text eol=crlf
+
+# 二进制文件不做行尾转换
+*.ico binary
+*.png binary
+*.ttf binary
+*.bin binary

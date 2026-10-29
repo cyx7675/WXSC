@@ -1,0 +1,52 @@
+# ============================================================
+# 无线数传上位机 v2 · Git 忽略规则
+# 只纳入源码与文档，排除产物、缓存、运行时数据与调试临时文件
+# ============================================================
+
+# ---- Python 运行缓存 ----
+__pycache__/
+*.py[cod]
+*$py.class
+.venv/
+venv/
+
+# ---- PyInstaller 打包产物与构建缓存 ----
+build_web/
+dist/
+*.exe
+*.manifest
+
+# ---- 运行时落盘数据（CSV 录制） ----
+telemetry/
+*.csv
+
+# ---- 模拟器生成的二进制回放文件 ----
+sample_capture.bin
+
+# ---- Playwright / 浏览器调试日志 ----
+.playwright-cli/
+*.log
+
+# ---- tools/ 下带下划线前缀的临时调试产物 ----
+# （截图 / 基准 json / 打包日志；自检脚本 record_check.py 等不带下划线，正常纳入版本控制）
+tools/_*.png
+tools/_*.json
+tools/_*.log
+tools/_build_log.txt
+tools/_perf_web/
+tools/_verify/
+
+# ---- 旧快照备份（可选：如需纳入请删除本行） ----
+_backup_*/
+
+# ---- 编辑器 / 系统 ----
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# ��������־��ÿ������׷��һ��ͼ�κ�ˣ������Ų���˸��
+telemetry/startup.log
+telemetry/reader.log
+
