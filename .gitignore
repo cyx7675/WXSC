@@ -1,0 +1,72 @@
+# ==========================================================
+# CRT-WXSC · STM32F407VET6 赛车数采系统
+# Keil5 (MDK-ARM) + CubeMX + FreeRTOS
+# ==========================================================
+
+# ---------- Keil5 编译产物（占仓库体积 90%，必须排除）----------
+MDK-ARM/CRT-WXSC/
+MDK-ARM/DebugConfig/
+MDK-ARM/*.axf
+MDK-ARM/*.hex
+MDK-ARM/*.bin
+MDK-ARM/*.map
+MDK-ARM/*.htm
+MDK-ARM/*.lnp
+MDK-ARM/*.sct
+MDK-ARM/*.dep
+MDK-ARM/*.o
+MDK-ARM/*.d
+MDK-ARM/*.crf
+MDK-ARM/*.lst
+MDK-ARM/*.iex
+MDK-ARM/EventRecorderStub.scvd
+MDK-ARM/RTE/_*/*.c
+
+# Keil5 用户界面状态（每人一台机器一个样，不该进版本库）
+# 注意：.uvoptx 是下载/调试配置，保留；*.uvguix.* 是窗体位置，丢弃
+*.uvguix.*
+*.uvguix
+*.bak
+*.orig
+
+# ---------- VSCode 本机路径缓存 ----------
+.vscode/.browse.VC.db
+.vscode/c_cpp_properties.json.bak
+.vscode/ipch/
+.vscode/*.db
+MDK-ARM/.vscode/*.log
+MDK-ARM/.vscode/*.lock
+uv4.log
+
+# ---------- 空壳占位文件 ----------
+# MDK-ARM/task/ 下 7 个 task_*.c 均为 0 字节（早期误建的目录），
+# 真实任务代码在 MDK-ARM/Src/ 下，切勿误读此处
+MDK-ARM/task/
+
+# ---------- CubeMX ----------
+.mxproject.bak
+*.ioc.bak
+
+# ---------- 系统垃圾 ----------
+Thumbs.db
+desktop.ini
+.DS_Store
+~$*
+*.tmp
+*.log
+*.bak
+
+# ---------- CMSIS 中本工程未引用的库 ----------
+# CubeMX 默认全量拷贝，但本项目只用到 Core/Include/Device/RTOS2。
+# DSP(15M) / NN / Core_A / DAP 均未参与编译，排除后省约 18M。
+Drivers/CMSIS/DSP/
+Drivers/CMSIS/NN/
+Drivers/CMSIS/Core_A/
+Drivers/CMSIS/DAP/
+Drivers/CMSIS/Documentation/
+
+# ---------- 调试 / 抓包临时产物 ----------
+*.pcap
+*.pcapng
+logs/
+Log/

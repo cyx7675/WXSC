@@ -1,0 +1,11 @@
+{
+    "files.associations": {
+        "*.h": "c",
+        "*.c": "c"
+    },
+    "C_Cpp.default.configurationName": "Win32",
+    "C_Cpp.intelliSenseEngine": "default",
+    "C_Cpp.formatting": "disabled",
+    "C_Cpp.intelliSenseEngineFallback": "enabled",
+    "C_Cpp.errorSquiggles": "enabled"
+}

@@ -1,0 +1,28 @@
+# ==========================================================
+# 文本/二进制边界声明
+# 目的：防止 .hex / .axf / .sct 等二进制被当文本做换行转换，
+#       导致对象损坏、历史不可读。
+# 注意：这里不强制 eol 风格（不写 text=auto），
+#       因为工程内 CRLF/LF 混用，强制转换会造成整文件 diff 噪声。
+# ==========================================================
+
+# 编译产物一律二进制
+*.axf binary
+*.hex binary
+*.bin binary
+*.o   binary
+*.d   binary
+*.crf binary
+*.dep binary
+*.sct binary
+*.iex binary
+*.map binary
+*.scvd binary
+*.dbgconf binary
+
+# 图片/抓包/固件备份
+*.png binary
+*.jpg binary
+*.pcap binary
+*.pcapng binary
+*.bin.bin binary
